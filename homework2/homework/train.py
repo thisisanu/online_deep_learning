@@ -36,7 +36,14 @@ def train(
     logger = tb.SummaryWriter(log_dir)
 
     # note: the grader uses default kwargs, you'll have to bake them in for the final submission
-    model = load_model(model_name, **kwargs)
+    allowed_kwargs = {
+    "linear": {},
+    "mlp": {},
+    "mlp_deep": {"hidden_dim": kwargs.get("hidden_dim", 128), "num_layers": kwargs.get("num_layers", 3)},
+    "mlp_deep_residual": {"hidden_dim": kwargs.get("hidden_dim", 128), "num_layers": kwargs.get("num_layers", 3)},
+     }
+    kwargs = allowed_kwargs.get(model_name, {})
+     
     model = model.to(device)
     model.train()
 
