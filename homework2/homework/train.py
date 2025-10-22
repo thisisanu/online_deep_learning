@@ -62,8 +62,15 @@ def train(
             img, label = img.to(device), label.to(device)
 
             # TODO: implement training step
-            raise NotImplementedError("Training step not implemented")
-
+            #raise NotImplementedError("Training step not implemented")
+            outputs = model(img)
+            loss = loss_func(outputs, label)
+            # optimizer.zero_grad()
+            # loss.backward()
+            # optimizer.step()
+            batch_train_acc = 0.0  # replace with actual accuracy computation
+            metrics["train_acc"].append(batch_train_acc)
+            
             global_step += 1
 
         # disable gradient computation and switch to evaluation mode
@@ -74,13 +81,19 @@ def train(
                 img, label = img.to(device), label.to(device)
 
                 # TODO: compute validation accuracy
-                raise NotImplementedError("Validation accuracy not implemented")
+                #raise NotImplementedError("Validation accuracy not implemented")
+                batch_val_acc = 0.0  # replace with actual accuracy computation
+                metrics["val_acc"].append(batch_val_acc)
+
 
         # log average train and val accuracy to tensorboard
         epoch_train_acc = torch.as_tensor(metrics["train_acc"]).mean()
         epoch_val_acc = torch.as_tensor(metrics["val_acc"]).mean()
 
-        raise NotImplementedError("Logging not implemented")
+        #raise NotImplementedError("Logging not implemented")
+        logger.add_scalar("train/accuracy", epoch_train_acc, global_step)
+        logger.add_scalar("val/accuracy", epoch_val_acc, global_step)
+
 
         # print on first, last, every 10th epoch
         if epoch == 0 or epoch == num_epoch - 1 or (epoch + 1) % 10 == 0:
@@ -108,7 +121,10 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=2024)
 
     # optional: additional model hyperparamters
-    # parser.add_argument("--num_layers", type=int, default=3)
+    parser.add_argument("--num_layers", type=int, default=3)
+    parser.add_argument("--hidden_dim", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=128)
+
 
     # pass all arguments to train
     train(**vars(parser.parse_args()))

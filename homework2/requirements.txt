@@ -1,4 +1,19 @@
+#source C:/Users/USER/git/online_deep_learning/.venv/Scripts/activate
+# python3 -m pip install -r requirements.txt
+# Scientific stack
+numpy>=1.26.4 
 matplotlib>=3.5.0
 Pillow>=10.0.0
-tensorboard>=2.0.0
-termcolor==2.4.0
+
+# Logging and visualization
+tensorboard>=2.15.0
+termcolor>=2.4.0
+
+# Jupyter support (optional, for notebooks)
+ipykernel==6.22.0
+
+# PyTorch stack (Python 3.11 compatible - CPU version)
+torch>=2.2.2
+torchvision>=0.17.2
+torchaudio>=2.2.2
+
