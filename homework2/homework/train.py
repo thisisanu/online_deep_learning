@@ -46,6 +46,7 @@ def train(
     # create loss function and optimizer
     loss_func = ClassificationLoss()
     # optimizer = ...
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     global_step = 0
     metrics = {"train_acc": [], "val_acc": []}
@@ -65,10 +66,15 @@ def train(
             #raise NotImplementedError("Training step not implemented")
             outputs = model(img)
             loss = loss_func(outputs, label)
-            # optimizer.zero_grad()
-            # loss.backward()
-            # optimizer.step()
-            batch_train_acc = 0.0  # replace with actual accuracy computation
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            preds = outputs.argmax(dim=1)
+            correct = (preds == label).sum().item()
+            batch_train_acc = correct / label.size(0)
+
+            # replace with actual accuracy computation
+
             metrics["train_acc"].append(batch_train_acc)
             
             global_step += 1
@@ -84,6 +90,7 @@ def train(
                 #raise NotImplementedError("Validation accuracy not implemented")
                 batch_val_acc = 0.0  # replace with actual accuracy computation
                 metrics["val_acc"].append(batch_val_acc)
+
 
 
         # log average train and val accuracy to tensorboard
