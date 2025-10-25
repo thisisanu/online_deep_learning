@@ -96,8 +96,7 @@ class MLPClassifier(nn.Module):
         Returns:
             tensor (b, num_classes) logits
         """
-        #raise NotImplementedError("MLPClassifier.forward() is not implemented")
-       return self.model(x)
+        return self.model(x)
 
 
 class MLPClassifierDeep(nn.Module):
@@ -142,8 +141,7 @@ class MLPClassifierDeep(nn.Module):
         Returns:
             tensor (b, num_classes) logits
         """
-        #raise NotImplementedError("MLPClassifierDeep.forward() is not implemented")
-       return self.model(x)
+        return self.model(x)
 
 class MLPClassifierDeepResidual(nn.Module):
     """Deep MLP with one residual connection"""
