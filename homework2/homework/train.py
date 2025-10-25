@@ -121,7 +121,7 @@ def train(
 
                 # TODO: compute validation accuracy
                 #raise NotImplementedError("Validation accuracy not implemented")
-                 preds = outputs.argmax(dim=1)
+                preds = outputs.argmax(dim=1)
                 batch_val_acc = (preds == label).float().mean().item()
                 metrics["val_acc"].append(batch_val_acc)
           
