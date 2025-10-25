@@ -100,7 +100,7 @@ class MLPClassifier(nn.Module):
 
 
 class MLPClassifierDeep(nn.Module):
-     """Deep MLP with multiple hidden layers"""
+    """Deep MLP with multiple hidden layers"""
     def __init__(
         self,
         h: int = 64,
