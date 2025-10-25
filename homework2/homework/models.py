@@ -149,7 +149,7 @@ class MLPClassifierDeep(nn.Module):
 
 class ResidualBlock(nn.Module):
     """A simple residual MLP block"""
-    def __init__(self, hidden_dim: int, dropout: float = 0.1):
+    def __init__(self, hidden_dim: int, dropout: float = 0.05):
         super().__init__()
         self.fc1 = nn.Linear(hidden_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
@@ -174,7 +174,7 @@ class MLPClassifierDeepResidual(nn.Module):
         num_classes: int = 6,
         hidden_dim: int = 256,
         num_layers: int = 5,
-        dropout: float = 0.1
+        dropout: float = 0.05
     ):
         super().__init__()
         self.flatten = nn.Flatten()
