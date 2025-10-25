@@ -176,14 +176,21 @@ class MLPClassifierDeepResidual(nn.Module):
         """
         super().__init__()
         self.flatten = nn.Flatten()
-        self.hidden1 = nn.Linear(3*h*w, hidden_dim)
-        self.hidden_blocks = nn.ModuleList()
-        for _ in range(num_layers-1):
-            self.hidden_blocks.append(nn.Linear(hidden_dim, hidden_dim))
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(dropout)
-        self.output = nn.Linear(hidden_dim, num_classes)
 
+        # First hidden layer
+        self.hidden1 = nn.Linear(3*h*w, hidden_dim)
+        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        self.dropout1 = nn.Dropout(dropout)
+
+        # Second hidden layer
+        self.hidden2 = nn.Linear(hidden_dim, hidden_dim)
+        self.bn2 = nn.BatchNorm1d(hidden_dim)
+        self.dropout2 = nn.Dropout(dropout)
+
+        # Output layer
+        self.output = nn.Linear(hidden_dim, num_classes)
+        
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -193,14 +200,25 @@ class MLPClassifierDeepResidual(nn.Module):
             tensor (b, num_classes) logits
         """
         x = self.flatten(x)
-        out = self.relu(self.hidden1(x))
-        out = self.dropout(out)
-        for layer in self.hidden_blocks:
-            residual = out
-            out = self.relu(layer(out))
-            out = self.dropout(out)
-            out += residual  # residual connection
+        # First hidden layer
+        out = self.hidden1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.dropout1(out)
+
+        # Residual connection
+        residual = out
+
+        # Second hidden layer
+        out = self.hidden2(out)
+        out = self.bn2(out)
+        out += residual  # Residual addition
+        out = self.relu(out)
+        out = self.dropout2(out)
+
+        # Output layer
         logits = self.output(out)
+        return logits
 
 
 model_factory = {
