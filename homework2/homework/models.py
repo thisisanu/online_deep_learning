@@ -69,25 +69,25 @@ class MLPClassifier(nn.Module):
         h: int = 64,
         w: int = 64,
         num_classes: int = 6,
-        hidden_dim1: int = 128,
-        hidden_dim2: int = 128,
+        hidden_dim: int = 128,
         dropout: float = 0.3,
-        num_groups: int = 8
     ):
+        """
+        Args:
+            h: int, height of the input image
+            w: int, width of the input image
+            num_classes: int, number of classes
+            hidden_dim: int, size of hidden layer
+            dropout: float, dropout probability
+        """
         super().__init__()
-        assert hidden_dim1 % num_groups == 0
-        assert hidden_dim2 % num_groups == 0
+        
         self.model = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(3*h*w, hidden_dim1),
-            nn.GroupNorm(num_groups=num_groups, num_channels=hidden_dim1),
+            nn.Linear(3 * h * w, hidden_dim),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim1, hidden_dim2),
-            nn.GroupNorm(num_groups=num_groups, num_channels=hidden_dim2),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim2, num_classes)
+            nn.Linear(hidden_dim, num_classes)
         )
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
