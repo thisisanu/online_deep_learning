@@ -27,8 +27,8 @@ def test_logging(logger: tb.SummaryWriter):
         torch.manual_seed(epoch)
         for iteration in range(20):
             dummy_train_loss = 0.9 ** (epoch + iteration / 20.0)
-            dummy_train_accuracy = 0.1 * epoch + 0.01 * iteration  # deterministic scalar
-
+            dummy_train_accuracy = epoch / 10.0 + torch.randn(10)
+            
             # Log training loss
             logger.add_scalar("train_loss", dummy_train_loss, global_step)
 
@@ -43,7 +43,7 @@ def test_logging(logger: tb.SummaryWriter):
 
         # Validation loop
         for iteration in range(10):
-            dummy_val_accuracy = 0.1 * epoch + 0.005 * iteration  # deterministic scalar
+            dummy_validation_accuracy = epoch / 10.0 + torch.randn(10)
             metrics["val_acc"].append(dummy_val_accuracy)
 
         # Log average validation accuracy at same global_step
