@@ -173,12 +173,12 @@ class MLPClassifierDeepResidual(nn.Module):
 
         # First hidden layer
         self.hidden1 = nn.Linear(3*h*w, hidden_dim)
-        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        self.bn1 = nn.LayerNorm(hidden_dim)
         self.dropout1 = nn.Dropout(dropout)
 
         # Second hidden layer
         self.hidden2 = nn.Linear(hidden_dim, hidden_dim)
-        self.bn2 = nn.BatchNorm1d(hidden_dim)
+        self.bn2 = nn.LayerNorm(hidden_dim)
         self.dropout2 = nn.Dropout(dropout)
 
         # Output layer
