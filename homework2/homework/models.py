@@ -108,8 +108,8 @@ class MLPClassifierDeep(nn.Module):
         h: int = 64,
         w: int = 64,
         num_classes: int = 6,
-        hidden_dim: int = 128,   # dim
-        num_layers: int = 3,     
+        hidden_dim: int = 256,   # dim
+        num_layers: int = 5,     
         dropout: float = 0.1,    
     ):
         """
@@ -160,7 +160,13 @@ class ResidualBlock(nn.Module):
         )
 
     def forward(self, x):
-        return x + self.block(x)  # residual connection
+       # Save input for residual connection
+        residual = x
+        out = self.relu(self.fc1(x))
+        out = self.fc2(out)
+        # Add residual
+        out = self.relu(out + residual)
+        return out
         
 class MLPClassifierDeepResidual(nn.Module):
     """Deep MLP with one residual connection"""
