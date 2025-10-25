@@ -37,9 +37,9 @@ def test_logging(logger: tb.SummaryWriter):
 
             global_step += 1
 
-        # Log average training accuracy at last training step of the epoch
+        # Log average training accuracy at next training step of the epoch
         avg_train_acc = sum(metrics["train_acc"]) / len(metrics["train_acc"])
-        logger.add_scalar("train_accuracy", avg_train_acc, global_step)
+        logger.add_scalar("train_accuracy", avg_train_acc, global_step - 1)
 
         # Validation loop
         for iteration in range(10):
@@ -48,7 +48,7 @@ def test_logging(logger: tb.SummaryWriter):
 
         # Log average validation accuracy at same global_step
         avg_val_acc = sum(metrics["val_acc"]) / len(metrics["val_acc"])
-        logger.add_scalar("val_accuracy", avg_val_acc, global_step)
+        logger.add_scalar("val_accuracy", avg_val_acc, global_step - 1)
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
