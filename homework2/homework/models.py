@@ -65,38 +65,32 @@ class LinearClassifier(nn.Module):
 class MLPClassifier(nn.Module):
     """Single hidden layer MLP"""
     def __init__(
-        self,
+         self,
         h: int = 64,
         w: int = 64,
         num_classes: int = 6,
         hidden_dim1: int = 128,
         hidden_dim2: int = 128,
-        dropout: float = 0.3
+        dropout: float = 0.3,
+        num_groups: int = 8
     ):
-        """
-        An MLP with a single hidden layer
-
-        Args:
-            h: int, height of the input image
-            w: int, width of the input image
-            num_classes: int, number of classes
-        """
         super().__init__()
         self.model = nn.Sequential(
             nn.Flatten(),
-            
+
             nn.Linear(3*h*w, hidden_dim1),
-            nn.BatchNorm1d(hidden_dim1),
+            nn.GroupNorm(num_groups=num_groups, num_channels=hidden_dim1),
             nn.ReLU(),
             nn.Dropout(dropout),
-            
+
             nn.Linear(hidden_dim1, hidden_dim2),
-            nn.BatchNorm1d(hidden_dim2),
+            nn.GroupNorm(num_groups=num_groups, num_channels=hidden_dim2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            
+
             nn.Linear(hidden_dim2, num_classes)
         )
+        
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
