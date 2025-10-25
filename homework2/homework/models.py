@@ -172,7 +172,7 @@ class MLPClassifierDeepResidual(nn.Module):
         self.output = nn.Linear(hidden_dim, num_classes)
         self.relu = nn.ReLU()
 
-def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
             x: tensor (b, 3, H, W) image
