@@ -69,8 +69,8 @@ class MLPClassifier(nn.Module):
         h: int = 64,
         w: int = 64,
         num_classes: int = 6,
-        hidden_dim1: int = 512,
-        hidden_dim2: int = 256,
+        hidden_dim1: int = 128,
+        hidden_dim2: int = 128,
         dropout: float = 0.3
     ):
         """
