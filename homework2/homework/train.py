@@ -7,6 +7,8 @@ import torch
 import torch.utils.tensorboard as tb
 
 from .models import ClassificationLoss, load_model, save_model
+from models import LinearModel, MLP, MLPDeep, MLPDeepResidual
+
 from .utils import load_data
 
 
