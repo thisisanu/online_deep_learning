@@ -48,8 +48,8 @@ def train(
     allowed_kwargs = {
     "linear": {},
     "mlp": {},
-    "mlp_deep": {"hidden_dim": kwargs.get("hidden_dim", 128), "num_layers": kwargs.get("num_layers", 3)},
-    "mlp_deep_residual": {"hidden_dim": kwargs.get("hidden_dim", 128), "num_layers": kwargs.get("num_layers", 3)},
+    "mlp_deep": {"hidden_dim": kwargs.get("hidden_dim", 128), "num_layers": kwargs.get("num_layers", 4)},
+    "mlp_deep_residual": {"hidden_dim": kwargs.get("hidden_dim", 128), "num_layers": kwargs.get("num_layers", 4)},
      }
      # ✅ Get model-specific default arguments
     model_kwargs = allowed_kwargs.get(model_name)
