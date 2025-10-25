@@ -44,7 +44,7 @@ def test_logging(logger: tb.SummaryWriter):
         torch.manual_seed(epoch)
         for _ in range(10):
             dummy_val_accuracy = (epoch / 10.0 + torch.rand(1).item() * 0.1)  # scalar
-            metrics["val_acc"].append(dummy_validation_accuracy)
+            metrics["val_acc"].append(dummy_val_accuracy)
 
         # log average validation accuracy
         avg_val_acc = sum(metrics["val_acc"]) / len(metrics["val_acc"])
