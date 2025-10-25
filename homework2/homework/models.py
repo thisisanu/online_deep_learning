@@ -173,7 +173,7 @@ class MLPClassifierDeepResidual(nn.Module):
         w: int = 64,
         num_classes: int = 6,
         hidden_dim: int = 128,
-        num_layers: int = 5,
+        num_layers: int = 3,
         dropout: float = 0.05
     ):
         super().__init__()
