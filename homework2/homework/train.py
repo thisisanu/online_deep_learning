@@ -44,9 +44,14 @@ def train(
     "mlp_deep": {"hidden_dim": kwargs.get("hidden_dim", 128), "num_layers": kwargs.get("num_layers", 3)},
     "mlp_deep_residual": {"hidden_dim": kwargs.get("hidden_dim", 128), "num_layers": kwargs.get("num_layers", 3)},
      }
-    kwargs = allowed_kwargs.get(model_name, {})
-    model_kwargs.update(kwargs)  # user-provided overrides stay effective
+     # ✅ Get model-specific default arguments
+    model_kwargs = allowed_kwargs.get(model_name)
+    if model_kwargs is None:
+        raise ValueError(f"Unknown model_name: {model_name}")
 
+    # ✅ Merge user overrides (so kwargs from the function call take priority)
+    model_kwargs.update(kwargs)
+    
     # --- Instantiate the correct model ---
     if model_name == "linear":
         model = LinearModel(**model_kwargs)
