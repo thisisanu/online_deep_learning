@@ -6,7 +6,16 @@ import numpy as np
 import torch
 import torch.utils.tensorboard as tb
 
-from models import LinearModel, MLP, MLPDeep, MLPDeepResidual
+# Local project imports
+from models import (
+    LinearClassifier,
+    MLPClassifier,
+    MLPClassifierDeep,
+    MLPClassifierDeepResidual,
+    ClassificationLoss,
+    save_model,
+    load_model,
+)
 from models import ClassificationLoss, load_model, save_model
 from utils import load_data
 
@@ -52,13 +61,13 @@ def train(
     
     # --- Instantiate the correct model ---
     if model_name == "linear":
-        model = LinearModel(**model_kwargs)
+        model = LinearClassifier(**model_kwargs)
     elif model_name == "mlp":
-        model = MLP(**model_kwargs)
+        model = MLPClassifier(**model_kwargs)
     elif model_name == "mlp_deep":
-        model = MLPDeep(**model_kwargs)
+        model = MLPClassifierDeep(**model_kwargs)
     elif model_name == "mlp_deep_residual":
-        model = MLPDeepResidual(**model_kwargs)
+        model = MLPClassifierDeepResidual(**model_kwargs)
     else:
         raise ValueError(f"Unknown model name: {model_name}")
      
