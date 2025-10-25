@@ -126,7 +126,7 @@ class MLPClassifierDeep(nn.Module):
         #raise NotImplementedError("MLPClassifierDeep.__init__() is not implemented")
         self.flatten = nn.Flatten()
         self.hidden1 = nn.Linear(3 * h * w, 256)  # Example hidden layer size
-        self.hidden2 = nn.Linear(256, 128)
+        self.hidden2 = nn.Linear(128, 128)
         self.output = nn.Linear(128, num_classes)
         self.relu = nn.ReLU()
 
@@ -170,7 +170,7 @@ class MLPClassifierDeepResidual(nn.Module):
         #raise NotImplementedError("MLPClassifierDeepResidual.__init__() is not implemented")
         self.flatten = nn.Flatten()
         self.hidden1 = nn.Linear(3 * h * w, 256)  # Example hidden layer size
-        self.hidden2 = nn.Linear(256, 256)
+        self.hidden2 = nn.Linear(128, 128)
         self.output = nn.Linear(256, num_classes)
         self.relu = nn.ReLU()
 
