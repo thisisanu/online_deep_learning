@@ -109,9 +109,9 @@ class MLPClassifierDeep(nn.Module):
         h: int = 64,
         w: int = 64,
         num_classes: int = 6,
-        hidden_dim: int = 256,   # dim
-        num_layers: int = 5,     
-        dropout: float = 0.1,    
+        hidden_dim: int = 128,   # dim
+        num_layers: int = 3,     
+        dropout: float = 0.05,    
     ):
         """
         An MLP with multiple hidden layers
