@@ -104,9 +104,8 @@ def train(
             loss.backward()
             optimizer.step()
             preds = outputs.argmax(dim=1)
-            correct = (preds == label).sum().item()
-            batch_train_acc = correct / label.size(0)
-
+            batch_train_acc = (preds == label).float().mean().item()
+           
             # replace with actual accuracy computation
 
             metrics["train_acc"].append(batch_train_acc)
@@ -122,11 +121,10 @@ def train(
 
                 # TODO: compute validation accuracy
                 #raise NotImplementedError("Validation accuracy not implemented")
-                batch_val_acc = 0.0  # replace with actual accuracy computation
+                 preds = outputs.argmax(dim=1)
+                batch_val_acc = (preds == label).float().mean().item()
                 metrics["val_acc"].append(batch_val_acc)
-
-
-
+          
         # log average train and val accuracy to tensorboard
         epoch_train_acc = torch.as_tensor(metrics["train_acc"]).mean()
         epoch_val_acc = torch.as_tensor(metrics["val_acc"]).mean()
