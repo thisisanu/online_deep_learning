@@ -43,6 +43,19 @@ def train(
     "mlp_deep_residual": {"hidden_dim": kwargs.get("hidden_dim", 128), "num_layers": kwargs.get("num_layers", 3)},
      }
     kwargs = allowed_kwargs.get(model_name, {})
+    model_kwargs.update(kwargs)  # user-provided overrides stay effective
+
+    # --- Instantiate the correct model ---
+    if model_name == "linear":
+        model = LinearModel(**model_kwargs)
+    elif model_name == "mlp":
+        model = MLP(**model_kwargs)
+    elif model_name == "mlp_deep":
+        model = MLPDeep(**model_kwargs)
+    elif model_name == "mlp_deep_residual":
+        model = MLPDeepResidual(**model_kwargs)
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
      
     model = model.to(device)
     model.train()
