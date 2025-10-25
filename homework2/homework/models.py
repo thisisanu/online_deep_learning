@@ -81,7 +81,8 @@ class MLPClassifier(nn.Module):
 
         #raise NotImplementedError("MLPClassifier.__init__() is not implemented")
         self.flatten = nn.Flatten()
-        self.hidden = nn.Linear(3 * h * w, 128)  # Example hidden layer size
+        self.hidden1 = nn.Linear(3 * h * w, 128)  # input -> first hidden
+        self.hidden2 = nn.Linear(128, 128)        # first hidden -> second hidden
         self.output = nn.Linear(128, num_classes)
         self.relu = nn.ReLU()
 
@@ -97,6 +98,8 @@ class MLPClassifier(nn.Module):
         #raise NotImplementedError("MLPClassifier.forward() is not implemented")
         x = self.flatten(x)
         x = self.hidden(x)
+        x = self.relu(self.hidden1(x))
+        x = self.relu(self.hidden2(x))
         x = self.relu(x)
         logits = self.output(x)
         return logits
