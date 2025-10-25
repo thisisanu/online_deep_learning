@@ -108,6 +108,7 @@ class MLPClassifierDeep(nn.Module):
         num_classes: int = 6,
         hidden_dim: int = 128,   # dim
         num_layers: int = 2      # optional, default 2
+        dropout: float = 0.2,    # dropout probability
     ):
         """
         An MLP with multiple hidden layers
