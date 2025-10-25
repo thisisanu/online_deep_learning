@@ -48,7 +48,7 @@ def test_logging(logger: tb.SummaryWriter):
 
         # log average validation accuracy
         avg_val_acc = sum(metrics["val_acc"]) / len(metrics["val_acc"])
-        logger.add_scalar("val_accuracy", avg_val_acc, global_step - 1)
+        logger.add_scalar("val_accuracy", avg_val_acc, epoch)
 
 
 
