@@ -75,26 +75,18 @@ class MLPClassifier(nn.Module):
         num_groups: int = 8
     ):
         super().__init__()
-        # Check if hidden dims are divisible by num_groups
-        assert hidden_dim1 % num_groups == 0, "hidden_dim1 must be divisible by num_groups"
-        assert hidden_dim2 % num_groups == 0, "hidden_dim2 must be divisible by num_groups"
-
-        self.h = h
-        self.w = w
-
+        assert hidden_dim1 % num_groups == 0
+        assert hidden_dim2 % num_groups == 0
         self.model = nn.Sequential(
             nn.Flatten(),
-
             nn.Linear(3*h*w, hidden_dim1),
             nn.GroupNorm(num_groups=num_groups, num_channels=hidden_dim1),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
-
             nn.Linear(hidden_dim1, hidden_dim2),
             nn.GroupNorm(num_groups=num_groups, num_channels=hidden_dim2),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
-
             nn.Linear(hidden_dim2, num_classes)
         )
         
