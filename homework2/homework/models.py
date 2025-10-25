@@ -146,6 +146,22 @@ class MLPClassifierDeep(nn.Module):
         """
         return self.model(x)
 
+class ResidualBlock(nn.Module):
+    """A simple residual MLP block"""
+    def __init__(self, hidden_dim: int, dropout: float = 0.1):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x):
+        return x + self.block(x)  # residual connection
+        
 class MLPClassifierDeepResidual(nn.Module):
     """Deep MLP with one residual connection"""
     def __init__(
@@ -154,8 +170,8 @@ class MLPClassifierDeepResidual(nn.Module):
         w: int = 64,
         num_classes: int = 6,
         hidden_dim: int = 128,   # dim
-        num_layers: int = 4,      # optional, default 2
-        dropout=0.0
+        num_layers: int = 3,      # optional, default 2
+        dropout=0.1
     ):
         """
         Args:
@@ -169,17 +185,19 @@ class MLPClassifierDeepResidual(nn.Module):
         """
         super().__init__()
         self.flatten = nn.Flatten()
-        self.relu = nn.ReLU()
+        self.input_layer = nn.Sequential(
+            nn.Linear(3 * h * w, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
 
-        # First hidden layer
-        self.hidden1 = nn.Linear(3*h*w, hidden_dim)
-        self.bn1 = nn.LayerNorm(hidden_dim)
-        self.dropout1 = nn.Dropout(dropout)
+        # Residual blocks
+        self.blocks = nn.Sequential(*[
+            ResidualBlock(hidden_dim, dropout) for _ in range(num_layers)
+        ])
 
-        # Second hidden layer
-        self.hidden2 = nn.Linear(hidden_dim, hidden_dim)
-        self.bn2 = nn.LayerNorm(hidden_dim)
-        self.dropout2 = nn.Dropout(dropout)
+        # Output layer
+        self.output_layer = nn.Linear(hidden_dim, num_classes)
 
         # Output layer
         self.output = nn.Linear(hidden_dim, num_classes)
@@ -193,25 +211,10 @@ class MLPClassifierDeepResidual(nn.Module):
             tensor (b, num_classes) logits
         """
         x = self.flatten(x)
-        # First hidden layer
-        out = self.hidden1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.dropout1(out)
-
-        # Residual connection
-        residual = out
-
-        # Second hidden layer
-        out = self.hidden2(out)
-        out = self.bn2(out)
-        out += residual  # Residual addition
-        out = self.relu(out)
-        out = self.dropout2(out)
-
-        # Output layer
-        logits = self.output(out)
-        return logits
+        x = self.input_layer(x)
+        x = self.blocks(x)
+        x = self.output_layer(x)
+        return x
 
 
 model_factory = {
