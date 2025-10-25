@@ -127,8 +127,10 @@ class MLPClassifierDeep(nn.Module):
         input_dim = 3 * h * w
         for _ in range(num_layers):
             layers.append(nn.Linear(input_dim, hidden_dim))
+            layers.append(nn.LayerNorm(hidden_dim))  # layer normalization
             layers.append(nn.ReLU())
-            input_dim = hidden_dim
+            layers.append(nn.Dropout(dropout))
+            input_dim = hidden_dim  # next layer input dim
         layers.append(nn.Linear(hidden_dim, num_classes))
         self.model = nn.Sequential(*layers)
 
