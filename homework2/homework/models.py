@@ -10,6 +10,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class ClassificationLoss(nn.Module):
@@ -150,47 +151,35 @@ class ResidualBlock(nn.Module):
     """A simple residual MLP block"""
     def __init__(self, hidden_dim: int, dropout: float = 0.1):
         super().__init__()
-        self.block = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-        )
+        self.fc1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-       # Save input for residual connection
         residual = x
-        out = self.relu(self.fc1(x))
+        out = F.relu(self.fc1(x))
+        out = self.dropout(out)
         out = self.fc2(out)
-        # Add residual
-        out = self.relu(out + residual)
+        out = self.dropout(out)
+        out = F.relu(out + residual)  # Residual connection
         return out
-        
+
+
 class MLPClassifierDeepResidual(nn.Module):
-    """Deep MLP with one residual connection"""
+    """Deep MLP with residual connections"""
     def __init__(
         self,
         h: int = 64,
         w: int = 64,
         num_classes: int = 6,
-        hidden_dim: int = 128,   # dim
-        num_layers: int = 3,      # optional, default 2
-        dropout=0.1
+        hidden_dim: int = 128,
+        num_layers: int = 3,
+        dropout: float = 0.1
     ):
-        """
-        Args:
-            h: int, height of image
-            w: int, width of image
-            num_classes: int
-
-        Hint - you can add more arguments to the constructor such as:
-            hidden_dim: int, size of hidden layers
-            num_layers: int, number of hidden layers
-        """
         super().__init__()
         self.flatten = nn.Flatten()
+        
+        # Input layer
         self.input_layer = nn.Sequential(
             nn.Linear(3 * h * w, hidden_dim),
             nn.ReLU(),
@@ -205,17 +194,7 @@ class MLPClassifierDeepResidual(nn.Module):
         # Output layer
         self.output_layer = nn.Linear(hidden_dim, num_classes)
 
-        # Output layer
-        self.output = nn.Linear(hidden_dim, num_classes)
-        
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: tensor (b, 3, H, W) image
-
-        Returns:
-            tensor (b, num_classes) logits
-        """
         x = self.flatten(x)
         x = self.input_layer(x)
         x = self.blocks(x)
