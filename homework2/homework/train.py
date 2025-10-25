@@ -7,7 +7,7 @@ import torch
 import torch.utils.tensorboard as tb
 
 # Local project imports
-from models import (
+from .models import (
     LinearClassifier,
     MLPClassifier,
     MLPClassifierDeep,
@@ -16,8 +16,8 @@ from models import (
     save_model,
     load_model,
 )
-from models import ClassificationLoss, load_model, save_model
-from utils import load_data
+from .models import ClassificationLoss, load_model, save_model
+from .utils import load_data
 
 def train(
     exp_dir: str = "logs",
