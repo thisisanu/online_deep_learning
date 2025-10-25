@@ -118,9 +118,7 @@ def train(
 
             for img, label in val_data:
                 img, label = img.to(device), label.to(device)
-
-                # TODO: compute validation accuracy
-                #raise NotImplementedError("Validation accuracy not implemented")
+                outputs = model(img)  
                 preds = outputs.argmax(dim=1)
                 batch_val_acc = (preds == label).float().mean().item()
                 metrics["val_acc"].append(batch_val_acc)
