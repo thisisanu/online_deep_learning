@@ -69,7 +69,9 @@ class MLPClassifier(nn.Module):
         h: int = 64,
         w: int = 64,
         num_classes: int = 6,
-        hidden_dim: int = 128,   # dim
+        hidden_dim1: int = 512,
+        hidden_dim2: int = 256,
+        dropout: float = 0.3
     ):
         """
         An MLP with a single hidden layer
@@ -82,12 +84,19 @@ class MLPClassifier(nn.Module):
         super().__init__()
         self.model = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(3*h*w, hidden_dim),
+            
+            nn.Linear(3*h*w, hidden_dim1),
+            nn.BatchNorm1d(hidden_dim1),
             nn.ReLU(),
-            nn.Linear(hidden_dim, num_classes)
+            nn.Dropout(dropout),
+            
+            nn.Linear(hidden_dim1, hidden_dim2),
+            nn.BatchNorm1d(hidden_dim2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            
+            nn.Linear(hidden_dim2, num_classes)
         )
-
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -108,7 +117,7 @@ class MLPClassifierDeep(nn.Module):
         num_classes: int = 6,
         hidden_dim: int = 128,   # dim
         num_layers: int = 2,      # optional, default 2
-        dropout: float = 0.2,    # dropout probability
+        dropout: float = 0.3,    # dropout probability
     ):
         """
         An MLP with multiple hidden layers
@@ -128,13 +137,11 @@ class MLPClassifierDeep(nn.Module):
         input_dim = 3 * h * w
         for _ in range(num_layers):
             layers.append(nn.Linear(input_dim, hidden_dim))
-            layers.append(nn.LayerNorm(hidden_dim))  # layer normalization
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
-            input_dim = hidden_dim  # next layer input dim
+            input_dim = hidden_dim
         layers.append(nn.Linear(hidden_dim, num_classes))
         self.model = nn.Sequential(*layers)
-
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -154,7 +161,8 @@ class MLPClassifierDeepResidual(nn.Module):
         w: int = 64,
         num_classes: int = 6,
         hidden_dim: int = 128,   # dim
-        num_layers: int = 2      # optional, default 2
+        num_layers: int = 2,      # optional, default 2
+        dropout=0.3
     ):
         """
         Args:
@@ -167,13 +175,14 @@ class MLPClassifierDeepResidual(nn.Module):
             num_layers: int, number of hidden layers
         """
         super().__init__()
-
-        #raise NotImplementedError("MLPClassifierDeepResidual.__init__() is not implemented")
         self.flatten = nn.Flatten()
         self.hidden1 = nn.Linear(3*h*w, hidden_dim)
-        self.hidden2 = nn.Linear(hidden_dim, hidden_dim)
-        self.output = nn.Linear(hidden_dim, num_classes)
+        self.hidden_blocks = nn.ModuleList()
+        for _ in range(num_layers-1):
+            self.hidden_blocks.append(nn.Linear(hidden_dim, hidden_dim))
         self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
+        self.output = nn.Linear(hidden_dim, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -184,14 +193,14 @@ class MLPClassifierDeepResidual(nn.Module):
             tensor (b, num_classes) logits
         """
         x = self.flatten(x)
-        out = self.hidden1(x)
-        out = self.relu(out)
-        residual = out
-        out = self.hidden2(out)
-        out += residual  # Residual connection
-        out = self.relu(out)
+        out = self.relu(self.hidden1(x))
+        out = self.dropout(out)
+        for layer in self.hidden_blocks:
+            residual = out
+            out = self.relu(layer(out))
+            out = self.dropout(out)
+            out += residual  # residual connection
         logits = self.output(out)
-        return logits
 
 
 model_factory = {
