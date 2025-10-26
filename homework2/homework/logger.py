@@ -39,7 +39,9 @@ def test_logging(logger: tb.SummaryWriter):
 
         # Log average training accuracy at next training step of the epoch
         avg_train_acc = sum(metrics["train_acc"]) / len(metrics["train_acc"])
-        avg_train_acc = avg_train_acc.item() if torch.is_tensor(avg_train_acc) else avg_train_acc
+        # Compute the average accuracy across all elements
+        avg_train_acc = train_accs.mean().item()
+
         logger.add_scalar("train_accuracy", avg_train_acc, global_step - 1)
 
         # Validation loop
