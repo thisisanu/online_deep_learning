@@ -46,7 +46,7 @@ def test_logging(logger: tb.SummaryWriter):
 
         # Validation loop
         for iteration in range(10):
-            dummy_validation_accuracy = epoch / 10.0 + torch.randn(10)
+            dummy_val_accuracy = epoch / 10.0 + torch.randn(10)
             metrics["val_acc"].append(dummy_val_accuracy)
 
         # Log average validation accuracy at same global_step
