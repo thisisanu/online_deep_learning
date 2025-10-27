@@ -45,6 +45,7 @@ def test_logging(logger: tb.SummaryWriter):
         logger.add_scalar("train_accuracy", avg_train_acc, global_step - 1)
 
         # Validation loop
+        torch.manual_seed(epoch)  # deterministic
         for iteration in range(10):
             dummy_val_accuracy = epoch / 10.0 + torch.randn(10)
             metrics["val_acc"].append(dummy_val_accuracy)
