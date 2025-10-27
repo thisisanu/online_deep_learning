@@ -51,6 +51,9 @@ def test_logging(logger: tb.SummaryWriter):
 
         # Log average validation accuracy at same global_step
         avg_val_acc = sum(metrics["val_acc"]) / len(metrics["val_acc"])
+        # Compute scalar average
+        avg_val_acc = torch.stack(metrics["val_acc"]).mean().item()
+
         logger.add_scalar("val_accuracy", avg_val_acc, global_step - 1)
 
 if __name__ == "__main__":
