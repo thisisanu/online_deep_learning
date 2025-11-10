@@ -8,10 +8,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+# Add the current directory (homework/) to sys.path
+sys.path.append(os.path.dirname(__file__))
 from datasets.classification_dataset import SuperTuxClassificationDataset, load_data, get_class_names
-
 from models import Classifier, save_model
-
 
 # -----------------------------
 # Argument parser
