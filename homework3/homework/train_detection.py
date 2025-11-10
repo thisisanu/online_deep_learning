@@ -34,6 +34,16 @@ depth_criterion = nn.L1Loss()  # MAE for depth
 optimizer = optim.Adam(model.parameters(), lr=lr)
 
 # -----------------------
+# Track best model
+# -----------------------
+best_val_iou = 0.0
+best_model_wts = None
+
+# Path to homework folder
+homework_dir = Path(__file__).resolve().parent
+homework_model_path = homework_dir / "detector.th"
+
+# -----------------------
 # Training Loop
 # -----------------------
 for epoch in range(num_epochs):
@@ -51,7 +61,7 @@ for epoch in range(num_epochs):
 
         seg_loss = seg_criterion(seg_logits, seg_labels)
         depth_loss = depth_criterion(depth_pred.squeeze(1), depth_labels)
-        loss = seg_loss + depth_loss  # Combine losses
+        loss = seg_loss + depth_loss
 
         loss.backward()
         optimizer.step()
@@ -102,8 +112,28 @@ for epoch in range(num_epochs):
     # -----------------------
     # Save checkpoint
     # -----------------------
+    checkpoint_dir = homework_dir / "checkpoints"
+    checkpoint_dir.mkdir(exist_ok=True)
     torch.save({
         'epoch': epoch + 1,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-    }, f"checkpoints/detector_epoch{epoch+1}.pt")
+    }, checkpoint_dir / f"detector_epoch{epoch+1}.pt")
+
+    # -----------------------
+    # Save best model safely
+    # -----------------------
+    if val_iou > best_val_iou:
+        best_val_iou = val_iou
+        best_model_wts = model.state_dict()
+
+        # Save detector.th in homework folder
+        torch.save(best_model_wts, homework_model_path)
+        print(f"Saved best model with val IoU: {best_val_iou:.4f} -> {homework_model_path}")
+
+# -----------------------
+# Final save at end of training (just in case)
+# -----------------------
+if best_model_wts is not None:
+    torch.save(best_model_wts, homework_model_path)
+    print(f"Final best model saved to {homework_model_path}")
