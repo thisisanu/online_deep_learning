@@ -31,6 +31,7 @@ print(f"Using device: {device}")
 # -----------------------------
 # Get class names from labels.csv
 # -----------------------------
+print("[train_classification] Looking for labels.csv at:", os.path.join(args.data_dir, "train", "labels.csv"))
 class_names = get_class_names(args.data_dir, split="train")
 print(f"Found classes: {class_names}")
 
