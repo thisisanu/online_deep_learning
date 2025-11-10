@@ -109,15 +109,17 @@ print(f"\nTraining complete. Best val Acc: {best_acc:.4f}")
 # Save best model
 # -----------------------------
 model.load_state_dict(best_model_wts)
+
 # Primary save (using existing helper)
 save_model(model)  # Saves to homework/classifier.th
 
-# Safety copy in homework/ directory
+# Ensure safety copy in homework/ directory
 homework_dir = Path(__file__).resolve().parent
 weights_path = homework_dir / "classifier.th"
-if not weights_path.exists():
-    print(f"Warning: {weights_path} not found after save_model. Creating safety copy...")
-    torch.save(model.state_dict(), weights_path)
+
+# Save explicitly in case save_model missed it
+torch.save(model.state_dict(), weights_path)
 
 print(f"Saved model with validation accuracy: {best_acc:.3f}")
+print(f"Model weights saved to: {weights_path.resolve()}")
 
