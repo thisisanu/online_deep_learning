@@ -5,8 +5,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .datasets.classification_dataset import load_data, LABEL_NAMES
-from models import Classifier, save_model  # your Classifier model
+# -----------------------------
+# Add homework folder to Python path
+# -----------------------------
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+
+# Now we can import your dataset loader and model
+from datasets.classification_dataset import load_data, LABEL_NAMES
+from models import Classifier, save_model
+
 
 # -----------------------------
 # Argument parser
