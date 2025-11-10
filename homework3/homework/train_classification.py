@@ -1,13 +1,11 @@
 import os
 import argparse
-import time
 import copy
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from classification_dataset import load_data, LABEL_NAMES  # your custom dataset
+from classification_dataset import load_data, LABEL_NAMES  # your dataset loader
 from models import Classifier, save_model  # your Classifier model
 
 # -----------------------------
@@ -29,33 +27,32 @@ print(f"Using device: {device}")
 # -----------------------------
 # Data loaders
 # -----------------------------
-train_loader = load_data(
+train_dataset = load_data(
     dataset_path=os.path.join(args.data_dir, "train"),
     transform_pipeline="aug",
-    batch_size=args.batch_size,
-    shuffle=True
+    return_dataloader=False
 )
-
-val_loader = load_data(
+val_dataset = load_data(
     dataset_path=os.path.join(args.data_dir, "val"),
     transform_pipeline="default",
-    batch_size=args.batch_size,
-    shuffle=False
+    return_dataloader=False
+)
+
+train_loader = torch.utils.data.DataLoader(
+    train_dataset, batch_size=args.batch_size, shuffle=True
+)
+val_loader = torch.utils.data.DataLoader(
+    val_dataset, batch_size=args.batch_size, shuffle=False
 )
 
 dataloaders = {"train": train_loader, "val": val_loader}
-dataset_sizes = {
-    "train": len(load_data(os.path.join(args.data_dir, "train"), return_dataloader=False)),
-    "val": len(load_data(os.path.join(args.data_dir, "val"), return_dataloader=False))
-}
+dataset_sizes = {"train": len(train_dataset), "val": len(val_dataset)}
 class_names = LABEL_NAMES
 
 # -----------------------------
 # Model, criterion, optimizer
 # -----------------------------
-model = Classifier(in_channels=3, num_classes=len(class_names))
-model = model.to(device)
-
+model = Classifier(in_channels=3, num_classes=len(class_names)).to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
@@ -66,7 +63,7 @@ best_model_wts = copy.deepcopy(model.state_dict())
 best_acc = 0.0
 
 for epoch in range(args.epochs):
-    print(f"Epoch {epoch+1}/{args.epochs}")
+    print(f"\nEpoch {epoch+1}/{args.epochs}")
     print("-" * 20)
 
     for phase in ["train", "val"]:
@@ -84,7 +81,6 @@ for epoch in range(args.epochs):
 
             optimizer.zero_grad()
 
-            # forward
             with torch.set_grad_enabled(phase == "train"):
                 outputs = model(inputs)
                 _, preds = torch.max(outputs, 1)
@@ -95,19 +91,18 @@ for epoch in range(args.epochs):
                     optimizer.step()
 
             running_loss += loss.item() * inputs.size(0)
-            running_corrects += torch.sum(preds == labels.data)
+            running_corrects += torch.sum(preds == labels.data).item()
 
         epoch_loss = running_loss / dataset_sizes[phase]
-        epoch_acc = running_corrects.double() / dataset_sizes[phase]
+        epoch_acc = running_corrects / dataset_sizes[phase]
 
         print(f"{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
-        # deep copy the best model
         if phase == "val" and epoch_acc > best_acc:
             best_acc = epoch_acc
             best_model_wts = copy.deepcopy(model.state_dict())
 
-print(f"Training complete. Best val Acc: {best_acc:.4f}")
+print(f"\nTraining complete. Best val Acc: {best_acc:.4f}")
 
 # -----------------------------
 # Save best model
