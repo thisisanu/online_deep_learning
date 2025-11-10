@@ -1,12 +1,16 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import sys
 from torch.utils.data import DataLoader
 from pathlib import Path
 from datasets.road_dataset import load_data
 from models import Detector
 from metrics import ConfusionMatrix
 
+# Ensure homework root is on sys.path
+HOMEWORK_ROOT = Path(__file__).resolve().parent
+sys.path.append(str(HOMEWORK_ROOT))
 # -----------------------
 # Hyperparameters
 # -----------------------
@@ -137,4 +141,5 @@ for epoch in range(num_epochs):
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
     print(f"Final best model saved to {homework_model_path}")
+
 
