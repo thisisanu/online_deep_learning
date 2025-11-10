@@ -11,6 +11,7 @@ from .datasets.classification_dataset import load_data
 from .metrics import AccuracyMetric
 
 def train(
+    data_dir: str = "./classification_data",
     exp_dir: str = "logs",
     num_epoch: int = 50,
     lr: float = 1e-3,
@@ -30,6 +31,10 @@ def train(
     exp_dir = Path(exp_dir)
     exp_dir.mkdir(exist_ok=True)
 
+    data_dir = Path(data_dir)
+    train_path = data_dir / "train"
+    val_path = data_dir / "val"
+
     # Setup device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -46,10 +51,10 @@ def train(
     train_accuracy = AccuracyMetric()
     val_accuracy = AccuracyMetric()
     
-    # Create data loaders with augmentation for training
-    train_data = load_data("./classification_data/train", transform_pipeline="aug", 
+    # Create data loaders
+    train_data = load_data(str(train_path), transform_pipeline="aug", 
                           shuffle=True, batch_size=batch_size)
-    val_data = load_data("./classification_data/val", transform_pipeline="default", 
+    val_data = load_data(str(val_path), transform_pipeline="default", 
                         shuffle=False, batch_size=batch_size)
 
     # Setup tensorboard
@@ -127,6 +132,7 @@ def train(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
+    parser.add_argument("--data_dir", type=str, default="./classification_data", help="Base directory of classification data")
     parser.add_argument("--exp_dir", type=str, default="logs")
     parser.add_argument("--num_epoch", type=int, default=50)
     parser.add_argument("--lr", type=float, default=1e-3)
