@@ -1,151 +1,133 @@
-import argparse
-from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.utils.tensorboard as tb
+import torchvision.models as models
+import argparse
+import os
 
-from homework.models import load_model, save_model
-from homework.datasets.classification_dataset import load_data
-from homework.metrics import AccuracyMetric
+# ✅ Import your dataset loader
+from homework.datasets.classification_dataset import load_data, LABEL_NAMES
 
 
-def train(
-    data_dir: str = "./classification_data",
-    exp_dir: str = "logs",
-    num_epoch: int = 50,
-    lr: float = 1e-3,
-    batch_size: int = 128,
-    seed: int = 2024,
-    **kwargs,
-):
-    """
-    Main training loop for the classifier
-    """
-    # Set random seeds
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-    
-    # Create directories
-    exp_dir = Path(exp_dir)
-    exp_dir.mkdir(exist_ok=True)
-
-    data_dir = Path(data_dir)
-    train_path = data_dir / "train"
-    val_path = data_dir / "val"
-
-    # Setup device
+# ------------------------- #
+# Device setup
+# ------------------------- #
+def setup_device():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+    return device
 
-    # Create model
-    model = load_model("classifier", with_weights=False).to(device)
 
-    # Create optimizer and loss
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+# ------------------------- #
+# Model creation
+# ------------------------- #
+def create_model(num_classes, pretrained=True):
+    model = models.resnet18(weights="IMAGENET1K_V1" if pretrained else None)
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Linear(num_ftrs, num_classes)
+    return model
+
+
+# ------------------------- #
+# Training one epoch
+# ------------------------- #
+def train_one_epoch(model, dataloader, criterion, optimizer, device):
+    model.train()  # ✅ switch to training mode
+    running_loss, running_corrects = 0.0, 0
+
+    for inputs, labels in dataloader:
+        inputs, labels = inputs.to(device), labels.to(device)
+
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        _, preds = torch.max(outputs, 1)
+
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item() * inputs.size(0)
+        running_corrects += torch.sum(preds == labels.data)
+
+    epoch_loss = running_loss / len(dataloader.dataset)
+    epoch_acc = running_corrects.double() / len(dataloader.dataset)
+    return epoch_loss, epoch_acc.item()
+
+
+# ------------------------- #
+# Evaluation
+# ------------------------- #
+def evaluate(model, dataloader, criterion, device):
+    model.eval()  # ✅ switch to eval mode before inference
+    running_loss, running_corrects = 0.0, 0
+
+    with torch.inference_mode():  # ✅ safe mode for validation
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            _, preds = torch.max(outputs, 1)
+
+            running_loss += loss.item() * inputs.size(0)
+            running_corrects += torch.sum(preds == labels.data)
+
+    loss = running_loss / len(dataloader.dataset)
+    acc = running_corrects.double() / len(dataloader.dataset)
+    return loss, acc.item()
+
+
+# ------------------------- #
+# Main Function
+# ------------------------- #
+def main():
+    parser = argparse.ArgumentParser(description="SuperTux Classification Training")
+    parser.add_argument("--data_dir", type=str, default="./classification_data",
+                        help="Path to dataset directory")
+    parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
+    parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    args = parser.parse_args()
+
+    device = setup_device()
+
+    # ✅ Use your SuperTuxDataset-based loader
+    print("Loading SuperTux classification dataset...")
+    train_loader = load_data(os.path.join(args.data_dir, "train"),
+                             transform_pipeline="aug",
+                             batch_size=args.batch_size,
+                             shuffle=True)
+    val_loader = load_data(os.path.join(args.data_dir, "val"),
+                           transform_pipeline="default",
+                           batch_size=args.batch_size,
+                           shuffle=False)
+    dataloaders = {"train": train_loader, "val": val_loader}
+
+    num_classes = len(LABEL_NAMES)
+    model = create_model(num_classes).to(device)
     criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    # Create metrics
-    train_accuracy = AccuracyMetric()
-    val_accuracy = AccuracyMetric()
-
-    # Load datasets
-    train_data = load_data(
-        str(train_path),
-        transform_pipeline="aug",
-        shuffle=True,
-        batch_size=batch_size,
-    )
-    val_data = load_data(
-        str(val_path),
-        transform_pipeline="default",
-        shuffle=False,
-        batch_size=batch_size,
-    )
-
-    # Setup TensorBoard
-    logger = tb.SummaryWriter(str(exp_dir / "train"), flush_secs=1)
+    print(f"Model: ResNet18 with {num_classes} output classes")
 
     # Training loop
-    global_step = 0
     best_val_acc = 0.0
+    for epoch in range(args.epochs):
+        print(f"\nEpoch {epoch + 1}/{args.epochs}")
+        train_loss, train_acc = train_one_epoch(model, dataloaders["train"], criterion, optimizer, device)
+        val_loss, val_acc = evaluate(model, dataloaders["val"], criterion, device)
 
-    for epoch in range(num_epoch):
-        print(f"\nEpoch {epoch+1}/{num_epoch}")
-        print("-" * 30)
+        print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
+        print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
 
-        # --- Training Phase ---
-        model.train()  # ✅ enable training mode
-        train_accuracy.reset()
-
-        for imgs, labels in train_data:
-            imgs, labels = imgs.to(device), labels.to(device)
-            optimizer.zero_grad()
-
-            logits = model(imgs)
-            loss = criterion(logits, labels)
-            loss.backward()
-            optimizer.step()
-
-            preds = logits.argmax(dim=1)
-            train_accuracy.add(preds.cpu(), labels.cpu())
-
-            logger.add_scalar("train/loss", loss.item(), global_step)
-            logger.add_scalar("train/accuracy", train_accuracy.get_value(), global_step)
-            global_step += 1
-
-        # --- Validation Phase ---
-        model.eval()  # ✅ switch to eval mode
-        val_accuracy.reset()
-        val_loss = 0.0
-        num_batches = 0
-
-        with torch.inference_mode():  # ✅ no gradient computation
-            for imgs, labels in val_data:
-                imgs, labels = imgs.to(device), labels.to(device)
-                logits = model(imgs)
-                loss = criterion(logits, labels)
-                val_loss += loss.item()
-
-                preds = logits.argmax(dim=1)
-                val_accuracy.add(preds.cpu(), labels.cpu())
-                num_batches += 1
-
-        val_loss /= num_batches
-        val_acc = val_accuracy.get_value()
-
-        print(f"Train Accuracy: {train_accuracy.get_value():.4f}")
-        print(f"Val Accuracy:   {val_acc:.4f}")
-
-        logger.add_scalar("val/loss", val_loss, epoch)
-        logger.add_scalar("val/accuracy", val_acc, epoch)
-
-        # Save best model
+        # ✅ Save best model
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            save_model(model)
-            print(f"✅ Saved best model (Val Acc = {best_val_acc:.4f})")
+            torch.save(model.state_dict(), "best_model.pth")
+            print(f"Saved best model (val_acc={val_acc:.4f})")
 
-    print("\n🎯 Training complete.")
-    print(f"Best validation accuracy achieved: {best_val_acc:.4f}")
+    print("\nTraining complete ✅")
+    print(f"Best validation accuracy: {best_val_acc:.4f}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train Classification Model")
-
-    parser.add_argument("--data_dir", type=str, default="./classification_data",
-                        help="Base directory for classification data")
-    parser.add_argument("--exp_dir", type=str, default="logs",
-                        help="Experiment log directory")
-    parser.add_argument("--num_epoch", type=int, default=10,
-                        help="Number of epochs to train")
-    parser.add_argument("--lr", type=float, default=1e-3,
-                        help="Learning rate")
-    parser.add_argument("--batch_size", type=int, default=128,
-                        help="Batch size for dataloaders")
-    parser.add_argument("--seed", type=int, default=2024,
-                        help="Random seed for reproducibility")
-
-    args = parser.parse_args()
-    train(**vars(args))
+    main()
