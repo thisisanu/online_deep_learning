@@ -5,8 +5,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.tensorboard as tb
 
-from homework.datasets.classification_dataset import load_data
 from homework.models import load_model, save_model
+from homework.datasets.classification_dataset import load_data
 from homework.metrics import AccuracyMetric
 
 
@@ -17,16 +17,17 @@ def train(
     lr: float = 1e-3,
     batch_size: int = 128,
     seed: int = 2024,
+    **kwargs,
 ):
     """
-    Main training loop for classification using SuperTuxDataset.
+    Main training loop for the classifier
     """
-    # Set seeds for reproducibility
+    # Set random seeds
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
-
-    # Prepare paths
+    
+    # Create directories
     exp_dir = Path(exp_dir)
     exp_dir.mkdir(exist_ok=True)
 
@@ -38,94 +39,113 @@ def train(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Load model
+    # Create model
     model = load_model("classifier", with_weights=False).to(device)
 
-    # Loss & optimizer
-    criterion = nn.CrossEntropyLoss()
+    # Create optimizer and loss
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    criterion = nn.CrossEntropyLoss()
 
-    # Metrics
-    train_acc = AccuracyMetric()
-    val_acc = AccuracyMetric()
+    # Create metrics
+    train_accuracy = AccuracyMetric()
+    val_accuracy = AccuracyMetric()
 
-    # Load data using your provided dataset code
+    # Load datasets
     train_data = load_data(
-        str(train_path), transform_pipeline="aug", shuffle=True, batch_size=batch_size
+        str(train_path),
+        transform_pipeline="aug",
+        shuffle=True,
+        batch_size=batch_size,
     )
     val_data = load_data(
-        str(val_path), transform_pipeline="default", shuffle=False, batch_size=batch_size
+        str(val_path),
+        transform_pipeline="default",
+        shuffle=False,
+        batch_size=batch_size,
     )
 
-    # TensorBoard setup
-    writer = tb.SummaryWriter(str(exp_dir / "train"), flush_secs=1)
+    # Setup TensorBoard
+    logger = tb.SummaryWriter(str(exp_dir / "train"), flush_secs=1)
 
-    best_val_acc = 0.0
+    # Training loop
     global_step = 0
+    best_val_acc = 0.0
 
     for epoch in range(num_epoch):
-        print(f"Epoch {epoch+1}/{num_epoch}")
+        print(f"\nEpoch {epoch+1}/{num_epoch}")
+        print("-" * 30)
 
-        # --- Training ---
-        model.train()
-        train_acc.reset()
+        # --- Training Phase ---
+        model.train()  # ✅ enable training mode
+        train_accuracy.reset()
+
         for imgs, labels in train_data:
             imgs, labels = imgs.to(device), labels.to(device)
             optimizer.zero_grad()
+
             logits = model(imgs)
             loss = criterion(logits, labels)
             loss.backward()
             optimizer.step()
 
-            # Update metrics
             preds = logits.argmax(dim=1)
-            train_acc.add(preds.cpu(), labels.cpu())
+            train_accuracy.add(preds.cpu(), labels.cpu())
 
-            # Log training loss
-            writer.add_scalar("train/loss", loss.item(), global_step)
-            writer.add_scalar("train/accuracy", train_acc.get_value(), global_step)
+            logger.add_scalar("train/loss", loss.item(), global_step)
+            logger.add_scalar("train/accuracy", train_accuracy.get_value(), global_step)
             global_step += 1
 
-        # --- Validation ---
-        model.eval()
-        val_acc.reset()
+        # --- Validation Phase ---
+        model.eval()  # ✅ switch to eval mode
+        val_accuracy.reset()
         val_loss = 0.0
         num_batches = 0
-        with torch.inference_mode():
+
+        with torch.inference_mode():  # ✅ no gradient computation
             for imgs, labels in val_data:
                 imgs, labels = imgs.to(device), labels.to(device)
                 logits = model(imgs)
-                val_loss += criterion(logits, labels).item()
+                loss = criterion(logits, labels)
+                val_loss += loss.item()
+
                 preds = logits.argmax(dim=1)
-                val_acc.add(preds.cpu(), labels.cpu())
+                val_accuracy.add(preds.cpu(), labels.cpu())
                 num_batches += 1
 
         val_loss /= num_batches
-        val_accuracy = val_acc.get_value()
+        val_acc = val_accuracy.get_value()
 
-        print(f"Train Accuracy: {train_acc.get_value():.3f}, Val Accuracy: {val_accuracy:.3f}")
+        print(f"Train Accuracy: {train_accuracy.get_value():.4f}")
+        print(f"Val Accuracy:   {val_acc:.4f}")
 
-        # Log validation metrics
-        writer.add_scalar("val/loss", val_loss, epoch)
-        writer.add_scalar("val/accuracy", val_accuracy, epoch)
+        logger.add_scalar("val/loss", val_loss, epoch)
+        logger.add_scalar("val/accuracy", val_acc, epoch)
 
         # Save best model
-        if val_accuracy > best_val_acc:
-            best_val_acc = val_accuracy
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
             save_model(model)
-            print(f"Saved best model (Val Acc = {best_val_acc:.3f})")
+            print(f"✅ Saved best model (Val Acc = {best_val_acc:.4f})")
 
-    print("Training complete.")
+    print("\n🎯 Training complete.")
+    print(f"Best validation accuracy achieved: {best_val_acc:.4f}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train classifier using SuperTuxDataset")
-    parser.add_argument("--data_dir", type=str, default="./classification_data", help="Base dataset directory")
-    parser.add_argument("--exp_dir", type=str, default="logs")
-    parser.add_argument("--num_epoch", type=int, default=10)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--seed", type=int, default=2024)
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="Train Classification Model")
 
+    parser.add_argument("--data_dir", type=str, default="./classification_data",
+                        help="Base directory for classification data")
+    parser.add_argument("--exp_dir", type=str, default="logs",
+                        help="Experiment log directory")
+    parser.add_argument("--num_epoch", type=int, default=10,
+                        help="Number of epochs to train")
+    parser.add_argument("--lr", type=float, default=1e-3,
+                        help="Learning rate")
+    parser.add_argument("--batch_size", type=int, default=128,
+                        help="Batch size for dataloaders")
+    parser.add_argument("--seed", type=int, default=2024,
+                        help="Random seed for reproducibility")
+
+    args = parser.parse_args()
     train(**vars(args))
