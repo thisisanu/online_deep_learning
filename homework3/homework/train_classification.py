@@ -9,9 +9,6 @@ import torch.optim as optim
 # -----------------------------
 # Fix imports: Add 'homework/' to sys.path
 # -----------------------------
-current_dir = os.path.dirname(os.path.abspath(__file__))  # homework/
-sys.path.append(current_dir)
-
 from models import Classifier, save_model
 from datasets.classification_dataset import SuperTuxClassificationDataset, load_data, get_class_names
 
