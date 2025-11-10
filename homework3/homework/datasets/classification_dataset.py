@@ -104,5 +104,5 @@ def get_class_names(root_dir, split='train'):
     with open(labels_file, mode='r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            class_names.add(int(row['label']))
+            class_names.add(row['label'])
     return sorted(list(class_names))
