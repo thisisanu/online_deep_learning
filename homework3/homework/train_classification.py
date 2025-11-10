@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from datasets.classification_dataset import load_data, LABEL_NAMES  # your dataset loader
+from .datasets.classification_dataset import load_data, LABEL_NAMES
 from models import Classifier, save_model  # your Classifier model
 
 # -----------------------------
