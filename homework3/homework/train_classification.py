@@ -8,13 +8,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-# -----------------------------
-# Add homework folder to Python path
-# -----------------------------
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+from datasets.classification_dataset import SuperTuxClassificationDataset, load_data, get_class_names
 
-# Now we can import your dataset loader and model
-from datasets.classification_dataset import load_data, LABEL_NAMES
 from models import Classifier, save_model
 
 
@@ -57,7 +52,7 @@ val_loader = torch.utils.data.DataLoader(
 
 dataloaders = {"train": train_loader, "val": val_loader}
 dataset_sizes = {"train": len(train_dataset), "val": len(val_dataset)}
-class_names = LABEL_NAMES
+class_names =  get_class_names(args.data_dir, split='train')
 
 # -----------------------------
 # Model, criterion, optimizer
