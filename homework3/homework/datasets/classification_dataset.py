@@ -50,7 +50,7 @@ class SuperTuxClassificationDataset(Dataset):
         with open(self.labels_file, mode='r') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                img_path = os.path.join(self.root_dir, row['filename'])
+                img_path = os.path.join(self.root_dir, row['file'])
                 label = int(row['label'])
                 if os.path.exists(img_path):
                     samples.append((img_path, label))
