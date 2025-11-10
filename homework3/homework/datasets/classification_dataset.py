@@ -98,6 +98,8 @@ def load_data(root_dir, batch_size=32, train=True):
 # Optional: for class names reference
 def get_class_names(root_dir, split='train'):
     labels_file = os.path.join(root_dir, split, "labels.csv")
+    print("[get_class_names] Looking for labels.csv at:", labels_file)
+
     class_names = set()
     with open(labels_file, mode='r') as f:
         reader = csv.DictReader(f)
