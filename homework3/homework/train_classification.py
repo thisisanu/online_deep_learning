@@ -1,15 +1,17 @@
 import os
-import argparse
-import time
-import copy
 import sys
-
+import argparse
+import copy
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-# Add the current directory (homework/) to sys.path
-sys.path.append(os.path.dirname(__file__))
+# -----------------------------
+# Fix imports: Add 'homework/' to sys.path
+# -----------------------------
+current_dir = os.path.dirname(os.path.abspath(__file__))  # homework/
+sys.path.append(current_dir)
+
 from datasets.classification_dataset import SuperTuxClassificationDataset, load_data, get_class_names
 from models import Classifier, save_model
 
@@ -30,29 +32,22 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # -----------------------------
+# Get class names from labels.csv
+# -----------------------------
+class_names = get_class_names(args.data_dir, split="train")
+print(f"Found classes: {class_names}")
+
+# -----------------------------
 # Data loaders
 # -----------------------------
-train_dataset = load_data(
-    dataset_path=os.path.join(args.data_dir, "train"),
-    transform_pipeline="aug",
-    return_dataloader=False
-)
-val_dataset = load_data(
-    dataset_path=os.path.join(args.data_dir, "val"),
-    transform_pipeline="default",
-    return_dataloader=False
-)
+train_dataset = SuperTuxClassificationDataset(root_dir=args.data_dir, split="train")
+val_dataset = SuperTuxClassificationDataset(root_dir=args.data_dir, split="val")
 
-train_loader = torch.utils.data.DataLoader(
-    train_dataset, batch_size=args.batch_size, shuffle=True
-)
-val_loader = torch.utils.data.DataLoader(
-    val_dataset, batch_size=args.batch_size, shuffle=False
-)
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
 dataloaders = {"train": train_loader, "val": val_loader}
 dataset_sizes = {"train": len(train_dataset), "val": len(val_dataset)}
-class_names =  get_class_names(args.data_dir, split='train')
 
 # -----------------------------
 # Model, criterion, optimizer
@@ -74,13 +69,15 @@ for epoch in range(args.epochs):
     for phase in ["train", "val"]:
         if phase == "train":
             model.train()
+            loader = train_loader
         else:
             model.eval()
+            loader = val_loader
 
         running_loss = 0.0
         running_corrects = 0
 
-        for inputs, labels in dataloaders[phase]:
+        for inputs, labels in loader:
             inputs = inputs.to(device)
             labels = labels.to(device)
 
@@ -113,5 +110,4 @@ print(f"\nTraining complete. Best val Acc: {best_acc:.4f}")
 # Save best model
 # -----------------------------
 model.load_state_dict(best_model_wts)
-save_path = save_model(model)
-print(f"Saved best model to {save_path}")
+save_path = save_m
