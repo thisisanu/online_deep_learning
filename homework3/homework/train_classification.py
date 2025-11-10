@@ -47,9 +47,9 @@ def train(
     val_accuracy = AccuracyMetric()
     
     # Create data loaders with augmentation for training
-    train_data = load_data("classification_data/train", transform_pipeline="aug", 
+    train_data = load_data("./classification_data/train", transform_pipeline="aug", 
                           shuffle=True, batch_size=batch_size)
-    val_data = load_data("classification_data/val", transform_pipeline="default", 
+    val_data = load_data("./classification_data/val", transform_pipeline="default", 
                         shuffle=False, batch_size=batch_size)
 
     # Setup tensorboard
