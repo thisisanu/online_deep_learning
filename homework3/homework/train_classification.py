@@ -1,133 +1,117 @@
+import os
+import argparse
+import time
+import copy
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchvision.models as models
-import argparse
-import os
 
-# ✅ Import your dataset loader
-from homework.datasets.classification_dataset import load_data, LABEL_NAMES
+from classification_dataset import load_data, LABEL_NAMES  # your custom dataset
+from models import Classifier, save_model  # your Classifier model
 
+# -----------------------------
+# Argument parser
+# -----------------------------
+parser = argparse.ArgumentParser(description="Train SuperTux classification model")
+parser.add_argument("--data_dir", type=str, default="./classification_data", help="Path to dataset")
+parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
+parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
+parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+args = parser.parse_args()
 
-# ------------------------- #
-# Device setup
-# ------------------------- #
-def setup_device():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    return device
+# -----------------------------
+# Device
+# -----------------------------
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
+# -----------------------------
+# Data loaders
+# -----------------------------
+train_loader = load_data(
+    dataset_path=os.path.join(args.data_dir, "train"),
+    transform_pipeline="aug",
+    batch_size=args.batch_size,
+    shuffle=True
+)
 
-# ------------------------- #
-# Model creation
-# ------------------------- #
-def create_model(num_classes, pretrained=True):
-    model = models.resnet18(weights="IMAGENET1K_V1" if pretrained else None)
-    num_ftrs = model.fc.in_features
-    model.fc = nn.Linear(num_ftrs, num_classes)
-    return model
+val_loader = load_data(
+    dataset_path=os.path.join(args.data_dir, "val"),
+    transform_pipeline="default",
+    batch_size=args.batch_size,
+    shuffle=False
+)
 
+dataloaders = {"train": train_loader, "val": val_loader}
+dataset_sizes = {
+    "train": len(load_data(os.path.join(args.data_dir, "train"), return_dataloader=False)),
+    "val": len(load_data(os.path.join(args.data_dir, "val"), return_dataloader=False))
+}
+class_names = LABEL_NAMES
 
-# ------------------------- #
-# Training one epoch
-# ------------------------- #
-def train_one_epoch(model, dataloader, criterion, optimizer, device):
-    model.train()  # ✅ switch to training mode
-    running_loss, running_corrects = 0.0, 0
+# -----------------------------
+# Model, criterion, optimizer
+# -----------------------------
+model = Classifier(in_channels=3, num_classes=len(class_names))
+model = model.to(device)
 
-    for inputs, labels in dataloader:
-        inputs, labels = inputs.to(device), labels.to(device)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        _, preds = torch.max(outputs, 1)
+# -----------------------------
+# Training loop
+# -----------------------------
+best_model_wts = copy.deepcopy(model.state_dict())
+best_acc = 0.0
 
-        loss.backward()
-        optimizer.step()
+for epoch in range(args.epochs):
+    print(f"Epoch {epoch+1}/{args.epochs}")
+    print("-" * 20)
 
-        running_loss += loss.item() * inputs.size(0)
-        running_corrects += torch.sum(preds == labels.data)
+    for phase in ["train", "val"]:
+        if phase == "train":
+            model.train()
+        else:
+            model.eval()
 
-    epoch_loss = running_loss / len(dataloader.dataset)
-    epoch_acc = running_corrects.double() / len(dataloader.dataset)
-    return epoch_loss, epoch_acc.item()
+        running_loss = 0.0
+        running_corrects = 0
 
+        for inputs, labels in dataloaders[phase]:
+            inputs = inputs.to(device)
+            labels = labels.to(device)
 
-# ------------------------- #
-# Evaluation
-# ------------------------- #
-def evaluate(model, dataloader, criterion, device):
-    model.eval()  # ✅ switch to eval mode before inference
-    running_loss, running_corrects = 0.0, 0
+            optimizer.zero_grad()
 
-    with torch.inference_mode():  # ✅ safe mode for validation
-        for inputs, labels in dataloader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            _, preds = torch.max(outputs, 1)
+            # forward
+            with torch.set_grad_enabled(phase == "train"):
+                outputs = model(inputs)
+                _, preds = torch.max(outputs, 1)
+                loss = criterion(outputs, labels)
+
+                if phase == "train":
+                    loss.backward()
+                    optimizer.step()
 
             running_loss += loss.item() * inputs.size(0)
             running_corrects += torch.sum(preds == labels.data)
 
-    loss = running_loss / len(dataloader.dataset)
-    acc = running_corrects.double() / len(dataloader.dataset)
-    return loss, acc.item()
+        epoch_loss = running_loss / dataset_sizes[phase]
+        epoch_acc = running_corrects.double() / dataset_sizes[phase]
 
+        print(f"{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
-# ------------------------- #
-# Main Function
-# ------------------------- #
-def main():
-    parser = argparse.ArgumentParser(description="SuperTux Classification Training")
-    parser.add_argument("--data_dir", type=str, default="./classification_data",
-                        help="Path to dataset directory")
-    parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-    parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs")
-    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
-    args = parser.parse_args()
+        # deep copy the best model
+        if phase == "val" and epoch_acc > best_acc:
+            best_acc = epoch_acc
+            best_model_wts = copy.deepcopy(model.state_dict())
 
-    device = setup_device()
+print(f"Training complete. Best val Acc: {best_acc:.4f}")
 
-    # ✅ Use your SuperTuxDataset-based loader
-    print("Loading SuperTux classification dataset...")
-    train_loader = load_data(os.path.join(args.data_dir, "train"),
-                             transform_pipeline="aug",
-                             batch_size=args.batch_size,
-                             shuffle=True)
-    val_loader = load_data(os.path.join(args.data_dir, "val"),
-                           transform_pipeline="default",
-                           batch_size=args.batch_size,
-                           shuffle=False)
-    dataloaders = {"train": train_loader, "val": val_loader}
-
-    num_classes = len(LABEL_NAMES)
-    model = create_model(num_classes).to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-
-    print(f"Model: ResNet18 with {num_classes} output classes")
-
-    # Training loop
-    best_val_acc = 0.0
-    for epoch in range(args.epochs):
-        print(f"\nEpoch {epoch + 1}/{args.epochs}")
-        train_loss, train_acc = train_one_epoch(model, dataloaders["train"], criterion, optimizer, device)
-        val_loss, val_acc = evaluate(model, dataloaders["val"], criterion, device)
-
-        print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
-        print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
-
-        # ✅ Save best model
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            torch.save(model.state_dict(), "best_model.pth")
-            print(f"Saved best model (val_acc={val_acc:.4f})")
-
-    print("\nTraining complete ✅")
-    print(f"Best validation accuracy: {best_val_acc:.4f}")
-
-
-if __name__ == "__main__":
-    main()
+# -----------------------------
+# Save best model
+# -----------------------------
+model.load_state_dict(best_model_wts)
+save_path = save_model(model)
+print(f"Saved best model to {save_path}")
