@@ -1,4 +1,3 @@
-# datasets/classification_dataset.py
 import os
 import csv
 from PIL import Image
@@ -7,13 +6,14 @@ import torchvision.transforms as T
 
 class SuperTuxClassificationDataset(Dataset):
     """
-    SuperTuxKart Classification Dataset
-    Auto-generates labels.csv if missing.
+    SuperTuxKart Classification Dataset.
+    Uses labels.csv for loading image paths and class labels.
+    Auto-generates labels.csv if missing based on folder structure.
     """
     def __init__(self, root_dir, split='train', transform=None):
         """
         Args:
-            root_dir (str): path to classification_data/
+            root_dir (str): Path to classification_data/
             split (str): 'train' or 'val'
             transform (callable): torchvision transforms to apply
         """
@@ -21,19 +21,16 @@ class SuperTuxClassificationDataset(Dataset):
         self.transform = transform
         self.labels_file = os.path.join(self.root_dir, "labels.csv")
 
-        # Generate labels.csv if missing
+        # Generate labels.csv if it doesn't exist
         if not os.path.exists(self.labels_file):
             self._generate_labels_csv()
 
-        # Load filenames and labels
+        # Load samples from labels.csv
         self.samples = self._load_labels()
 
     def _generate_labels_csv(self):
-        """
-        Automatically generate labels.csv based on folder structure:
-        folder names are used as class labels.
-        """
-        print(f"[INFO] labels.csv not found. Generating automatically in {self.root_dir}")
+        """Automatically generate labels.csv using folder structure"""
+        print(f"[INFO] labels.csv not found. Generating in {self.root_dir} ...")
         class_folders = sorted([f for f in os.listdir(self.root_dir) if os.path.isdir(os.path.join(self.root_dir, f))])
         self.class_to_idx = {cls_name: idx for idx, cls_name in enumerate(class_folders)}
 
@@ -48,9 +45,7 @@ class SuperTuxClassificationDataset(Dataset):
                         writer.writerow([img_path, self.class_to_idx[cls_name]])
 
     def _load_labels(self):
-        """
-        Load filenames and labels from labels.csv
-        """
+        """Load image paths and labels from labels.csv"""
         samples = []
         with open(self.labels_file, mode='r') as f:
             reader = csv.DictReader(f)
@@ -76,10 +71,7 @@ class SuperTuxClassificationDataset(Dataset):
         return image, label
 
 def get_transform(train=True):
-    """
-    Returns a torchvision transform pipeline.
-    Apply augmentations only if train=True
-    """
+    """Returns torchvision transforms for training or validation"""
     if train:
         transform = T.Compose([
             T.RandomHorizontalFlip(),
@@ -95,12 +87,20 @@ def get_transform(train=True):
     return transform
 
 def load_data(root_dir, batch_size=32, train=True):
-    """
-    Helper function to create DataLoader
-    """
+    """Returns a DataLoader for train/val set"""
     dataset = SuperTuxClassificationDataset(
         root_dir=root_dir,
         split='train' if train else 'val',
         transform=get_transform(train)
     )
     return DataLoader(dataset, batch_size=batch_size, shuffle=train, num_workers=2)
+
+# Optional: for class names reference
+def get_class_names(root_dir, split='train'):
+    labels_file = os.path.join(root_dir, split, "labels.csv")
+    class_names = set()
+    with open(labels_file, mode='r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            class_names.add(int(row['label']))
+    return sorted(list(class_names))
