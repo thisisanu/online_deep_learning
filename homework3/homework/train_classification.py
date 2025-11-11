@@ -11,8 +11,11 @@ from torchvision import transforms
 # -----------------------------
 # Fix imports: Add 'homework/' to sys.path
 # -----------------------------
-sys.path.append(str(Path(__file__).resolve().parent / "homework"))
-from datasets import SuperTuxClassificationDataset, get_class_names
+homework_path = Path(__file__).resolve().parent / "homework"
+sys.path.insert(0, str(homework_path))
+
+# Import local modules
+from datasets.classification_dataset import SuperTuxClassificationDataset, get_class_names
 from models import Classifier, save_model
 
 # -----------------------------
@@ -21,7 +24,7 @@ from models import Classifier, save_model
 parser = argparse.ArgumentParser(description="Train SuperTux classification model")
 parser.add_argument("--data_dir", type=str, default="./classification_data", help="Path to dataset")
 parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-parser.add_argument("--epochs", type=int, default=30, help="Number of epochs")  # increased
+parser.add_argument("--epochs", type=int, default=30, help="Number of epochs")
 parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
 args = parser.parse_args()
 
@@ -43,7 +46,7 @@ print(f"Found classes: {class_names}")
 # Data transforms
 # -----------------------------
 train_transform = transforms.Compose([
-    transforms.RandomResizedCrop(64),   # crop to random size, resize back
+    transforms.RandomResizedCrop(64),
     transforms.RandomHorizontalFlip(),
     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
     transforms.ToTensor(),
@@ -74,7 +77,7 @@ dataset_sizes = {"train": len(train_dataset), "val": len(val_dataset)}
 model = Classifier(in_channels=3, num_classes=len(class_names)).to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # decay LR every 10 epochs
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
 
 # -----------------------------
 # Training loop
@@ -112,14 +115,13 @@ for epoch in range(args.epochs):
             running_corrects += torch.sum(preds == labels.data).item()
 
         if phase == "train":
-            scheduler.step()  # update LR
+            scheduler.step()
 
         epoch_loss = running_loss / dataset_sizes[phase]
         epoch_acc = running_corrects / dataset_sizes[phase]
 
         print(f"{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
-        # Save best model
         if phase == "val" and epoch_acc > best_acc:
             best_acc = epoch_acc
             best_model_wts = copy.deepcopy(model.state_dict())
