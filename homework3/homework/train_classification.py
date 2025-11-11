@@ -60,6 +60,27 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
 # -----------------------------
+# Sanity check: inspect a single batch
+# -----------------------------
+print("\n[Sanity Check] Running one batch through the model...")
+
+sample_inputs, sample_labels = next(iter(train_loader))
+print(f"Input batch shape: {sample_inputs.shape}")   # Expected: [batch_size, 3, H, W]
+print(f"Labels shape: {sample_labels.shape}")       # Expected: [batch_size]
+
+sample_inputs = sample_inputs.to(device)
+sample_labels = sample_labels.to(device)
+
+model.eval()  # Ensure eval mode for sanity check
+with torch.inference_mode():
+    outputs = model(sample_inputs)
+    print(f"Output logits shape: {outputs.shape}")  # Expected: [batch_size, num_classes]
+    _, preds = torch.max(outputs, 1)
+    print(f"Predicted classes shape: {preds.shape}") # Expected: [batch_size]
+
+print("[Sanity Check] Passed! Shapes look correct.\n")
+
+# -----------------------------
 # Training loop
 # -----------------------------
 best_model_wts = copy.deepcopy(model.state_dict())
