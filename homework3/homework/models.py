@@ -1,41 +1,10 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from pathlib import Path
-
-HOMEWORK_DIR = Path(__file__).resolve().parent
-INPUT_MEAN = [0.2788, 0.2657, 0.2629]
-INPUT_STD = [0.2064, 0.1944, 0.2252]
-
 # ───────────────────────────────
-# Residual Block
-# ───────────────────────────────
-class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-
-        self.shortcut = nn.Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else nn.Identity()
-        self.bn_shortcut = nn.BatchNorm2d(out_channels) if in_channels != out_channels else nn.Identity()
-
-    def forward(self, x):
-        identity = self.bn_shortcut(self.shortcut(x))
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out += identity
-        out = F.relu(out)
-        return out
-
-
-# ───────────────────────────────
-# Classifier
+# Fixed Classifier
 # ───────────────────────────────
 class Classifier(nn.Module):
     """
     Convolutional image classifier for the SuperTux dataset.
+    Works with arbitrary input sizes using AdaptiveAvgPool2d.
     """
     def __init__(self, in_channels=3, num_classes=6):
         super().__init__()
@@ -54,9 +23,9 @@ class Classifier(nn.Module):
         self.res3 = ResidualBlock(128, 256)
         self.pool3 = nn.MaxPool2d(2)
 
-        # Fully connected classifier
-        self.feature_size = 256 * (64 // 8) * (64 // 8)
-        self.fc1 = nn.Linear(self.feature_size, 512)
+        # Adaptive pooling ensures fixed feature size
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc1 = nn.Linear(256, 512)
         self.dropout = nn.Dropout(0.5)
         self.fc2 = nn.Linear(512, num_classes)
 
@@ -70,7 +39,8 @@ class Classifier(nn.Module):
         x = self.pool2(self.res2(x))
         x = self.pool3(self.res3(x))
 
-        # Flatten and classify
+        # Adaptive pooling + flatten
+        x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
@@ -80,43 +50,14 @@ class Classifier(nn.Module):
     def predict(self, x):
         return self(x).argmax(dim=1)
 
+
 # ───────────────────────────────
-# Detector (Segmentation + Depth)
+# Fixed Detector
 # ───────────────────────────────
-class ConvBlock(nn.Module):
-    """Conv -> BN -> ReLU"""
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False)
-        self.bn = nn.BatchNorm2d(out_ch)
-        self.relu = nn.ReLU(inplace=True)
-
-    def forward(self, x):
-        return self.relu(self.bn(self.conv(x)))
-
-
-class UpBlock(nn.Module):
-    """Upsample with skip connection"""
-    def __init__(self, in_ch, skip_ch, out_ch):
-        super().__init__()
-        self.up = nn.ConvTranspose2d(in_ch, out_ch, 2, stride=2)
-        self.conv = ConvBlock(out_ch + skip_ch, out_ch)
-
-    def forward(self, x, skip):
-        x = self.up(x)
-        if x.shape[-2:] != skip.shape[-2:]:
-            x = F.interpolate(x, size=skip.shape[-2:], mode='bilinear', align_corners=False)
-        x = torch.cat([x, skip], dim=1)
-        return self.conv(x)
-
-
 class Detector(nn.Module):
     """
     Detector for joint segmentation (3 classes) and depth estimation.
-    Input: (B, 3, H, W)
-    Outputs:
-      - logits: (B, 3, H, W)
-      - depth:  (B, H, W)
+    Output is upsampled to match input size exactly.
     """
     def __init__(self, in_channels=3, num_classes=3):
         super().__init__()
@@ -154,6 +95,10 @@ class Detector(nn.Module):
         logits = self.seg_head(u2)
         depth = torch.sigmoid(self.depth_head(u2)).squeeze(1)
 
+        # Ensure outputs match input size exactly
+        logits = F.interpolate(logits, size=x.shape[-2:], mode='bilinear', align_corners=False)
+        depth = F.interpolate(depth.unsqueeze(1), size=x.shape[-2:], mode='bilinear', align_corners=False).squeeze(1)
+
         return logits, depth
 
     def predict(self, x):
@@ -162,38 +107,22 @@ class Detector(nn.Module):
 
 
 # ───────────────────────────────
-# Model Factory & Utilities
-# ───────────────────────────────
-MODEL_FACTORY = {"classifier": Classifier, "detector": Detector}
-
-def load_model(model_name: str, with_weights=False, **kwargs):
-    m = MODEL_FACTORY[model_name](**kwargs)
-    if with_weights:
-        path = HOMEWORK_DIR / f"{model_name}.th"
-        assert path.exists(), f"{path} not found"
-        m.load_state_dict(torch.load(path, map_location="cpu"))
-    return m
-
-def save_model(model: nn.Module) -> str:
-    for name, cls in MODEL_FACTORY.items():
-        if isinstance(model, cls):
-            path = HOMEWORK_DIR / f"{name}.th"
-            torch.save(model.state_dict(), path)
-            print(f"[INFO] Saved model to {path}")
-            return str(path)
-    raise ValueError(f"Unsupported model type: {type(model)}")
-
-
-# ───────────────────────────────
 # Debug
 # ───────────────────────────────
 def debug_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     sample = torch.rand(1, 3, 96, 128).to(device)
-    model = Detector().to(device)
-    model.eval()
-    logits, depth = model(sample)
-    print("Logits:", logits.shape, "Depth:", depth.shape)
+    model_cls = Classifier().to(device)
+    model_det = Detector().to(device)
+
+    model_cls.eval()
+    model_det.eval()
+
+    logits_cls = model_cls(sample)
+    logits_det, depth_det = model_det(sample)
+
+    print("Classifier logits:", logits_cls.shape)
+    print("Detector logits:", logits_det.shape, "Depth:", depth_det.shape)
 
 
 if __name__ == "__main__":
