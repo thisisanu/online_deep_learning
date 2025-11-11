@@ -18,8 +18,10 @@ class RoadDataset(Dataset):
         # Load episode info
         info = np.load(self.episode_path / "info.npz", allow_pickle=True)
         self.track = Track(**info["track"].item())
-        # Fixed: iterate over dictionary items
-        self.frames: dict[str, np.ndarray] = {k: np.stack(v) for k, v in info["frames"].item().items()}
+
+        # Ensure frames are loaded as arrays
+        frames_dict = info["frames"].item()
+        self.frames: dict[str, np.ndarray] = {k: np.stack(v) for k, v in frames_dict.items()}
 
         # Setup transform pipeline
         self.transform = self.get_transform(transform_pipeline)
@@ -39,6 +41,7 @@ class RoadDataset(Dataset):
                 road_transforms.ImageLoader(self.episode_path),
                 road_transforms.DepthLoader(self.episode_path),
                 road_transforms.TrackProcessor(self.track),
+                # Consistent augmentations
                 road_transforms.RandomHorizontalFlip(p=0.5),
                 road_transforms.RandomBrightnessContrast(p=0.3),
                 road_transforms.RandomRotate(limit=15, p=0.3),
@@ -54,13 +57,16 @@ class RoadDataset(Dataset):
     def __getitem__(self, idx):
         # Create sample dictionary from frames
         sample = {k: self.frames[k][idx] for k in self.frames}
-        sample['_idx'] = idx  # required for ImageLoader and other transforms
 
-        # Apply transform
+        # Provide index and full frames dict for transforms
+        sample['_idx'] = idx
+        sample['_frames'] = self.frames
+
+        # Apply transform pipeline
         if self.transform:
             sample = self.transform(sample)
 
-        # Ensure all arrays are contiguous to prevent stride issues
+        # Make arrays contiguous to avoid negative stride issues
         for key in ['image', 'track', 'depth']:
             if key in sample and isinstance(sample[key], np.ndarray):
                 sample[key] = sample[key].copy()
