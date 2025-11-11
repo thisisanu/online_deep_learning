@@ -80,22 +80,22 @@ class SuperTuxClassificationDataset(Dataset):
                         img_path = os.path.join(cls_name, img_file)  # relative path
                         writer.writerow([img_path, cls_name])  # store string label
 
-def get_transform(train=True):
-    """Returns torchvision transforms for training or validation"""
-    if train:
-        transform = T.Compose([
-            T.RandomHorizontalFlip(),
-            T.RandomRotation(15),
-            T.ToTensor(),
-            T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+def get_transform(split="train"):
+    if split == "train":
+        transform = transforms.Compose([
+            transforms.RandomHorizontalFlip(p=0.5),  # Randomly flip images
+            transforms.RandomRotation(15),           # Small rotations
+            transforms.ColorJitter(
+                brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1
+            ),                                        # Random color changes
+            transforms.ToTensor(),
         ])
-    else:
-        transform = T.Compose([
-            T.ToTensor(),
-            T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+    else:  # validation / test
+        transform = transforms.Compose([
+            transforms.ToTensor(),
         ])
     return transform
-
+    
 def load_data(root_dir, batch_size=32, train=True):
     """Returns a DataLoader for train/val set"""
     dataset = SuperTuxClassificationDataset(
