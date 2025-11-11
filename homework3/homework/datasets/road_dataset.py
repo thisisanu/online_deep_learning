@@ -1,5 +1,4 @@
 from pathlib import Path
-
 import numpy as np
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
@@ -22,14 +21,14 @@ class RoadDataset(Dataset):
         self.episode_path = Path(episode_path)
 
         info = np.load(self.episode_path / "info.npz", allow_pickle=True)
-
         self.track = Track(**info["track"].item())
         self.frames: dict[str, np.ndarray] = {k: np.stack(v) for k, v in info["frames"].item().items()}
         self.transform = self.get_transform(transform_pipeline)
 
     def get_transform(self, transform_pipeline: str):
-        xform = None
-
+        """
+        Returns a composed transform pipeline based on the string identifier.
+        """
         if transform_pipeline == "default":
             xform = road_transforms.Compose(
                 [
@@ -39,10 +38,20 @@ class RoadDataset(Dataset):
                 ]
             )
         elif transform_pipeline == "aug":
-            pass
-
-        if xform is None:
-            raise ValueError(f"Invalid transform {transform_pipeline} specified!")
+            # Augmentation pipeline for training
+            xform = road_transforms.Compose(
+                [
+                    road_transforms.ImageLoader(self.episode_path),
+                    road_transforms.DepthLoader(self.episode_path),
+                    road_transforms.TrackProcessor(self.track),
+                    # Augmentations applied consistently to image, depth, and mask
+                    road_transforms.RandomHorizontalFlip(p=0.5),
+                    road_transforms.RandomBrightnessContrast(p=0.3),
+                    road_transforms.RandomRotate(limit=15, p=0.3),
+                ]
+            )
+        else:
+            raise ValueError(f"Invalid transform '{transform_pipeline}' specified!")
 
         return xform
 
@@ -75,22 +84,19 @@ def load_data(
 ) -> DataLoader | Dataset:
     """
     Constructs the dataset/dataloader.
-    The specified transform_pipeline must be implemented in the RoadDataset class.
-
     Args:
-        transform_pipeline (str): 'default', 'aug', or other custom transformation pipelines
+        dataset_path (str): root folder containing episodes
+        transform_pipeline (str): 'default' or 'aug'
         return_dataloader (bool): returns either DataLoader or Dataset
-        num_workers (int): data workers, set to 0 for VSCode debugging
+        num_workers (int): data workers
         batch_size (int): batch size
-        shuffle (bool): should be true for train and false for val
-
+        shuffle (bool): shuffle dataset for training
     Returns:
         DataLoader or Dataset
     """
     dataset_path = Path(dataset_path)
     scenes = [x for x in dataset_path.iterdir() if x.is_dir()]
 
-    # can pass in a single scene like "road_data/val/cornfield_crossing_04"
     if not scenes and dataset_path.is_dir():
         scenes = [dataset_path]
 
