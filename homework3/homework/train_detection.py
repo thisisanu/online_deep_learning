@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from pathlib import Path
 from collections import Counter
-import numpy as np  # needed for numpy array checks
+import numpy as np
 
 from homework.datasets.road_dataset import load_data
 from homework.models import Detector
@@ -17,8 +17,8 @@ batch_size = 16
 lr = 1e-3
 num_epochs = 30
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-mixed_precision = True
-num_workers = 2
+mixed_precision = True  # Enable FP16 training
+num_workers = 2  # safer for Colab
 
 # -----------------------
 # Dataset and DataLoader
@@ -37,19 +37,20 @@ all_labels = []
 
 for sample in train_data:
     track = sample['track']
-
-    # Ensure it's a tensor
     if isinstance(track, np.ndarray):
-        track = torch.from_numpy(track).long()
+        # Make a contiguous copy to avoid negative stride issues
+        track = torch.from_numpy(track.copy()).long()
+    else:
+        track = track.long()
     all_labels.append(track.flatten())
 
 all_labels = torch.cat(all_labels)
 
-num_classes = 3
 class_counts = Counter(all_labels.tolist())
+num_classes = 3
 total = sum(class_counts.values())
 weights = [total / (num_classes * class_counts.get(cls, 1)) for cls in range(num_classes)]
-weights = torch.tensor(weights, device=device, dtype=torch.float)
+weights = torch.tensor(weights, device=device)
 
 # -----------------------
 # Model, Loss, Optimizer
@@ -58,12 +59,13 @@ model = Detector(in_channels=3, num_classes=num_classes).to(device)
 seg_criterion = nn.CrossEntropyLoss(weight=weights)
 depth_criterion = nn.L1Loss()
 optimizer = optim.Adam(model.parameters(), lr=lr)
+
 scaler = torch.cuda.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
 
 # -----------------------
 # Track best model
 # -----------------------
-homework_dir = Path.cwd()
+homework_dir = Path.cwd()  # Colab-friendly
 homework_model_path = homework_dir / "detector.th"
 checkpoint_dir = homework_dir / "checkpoints"
 checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +83,12 @@ for epoch in range(num_epochs):
 
     for batch in train_loader:
         images = batch['image'].to(device)
-        seg_labels = batch['track'].to(device)
+        seg_labels = batch['track']
+        if isinstance(seg_labels, np.ndarray):
+            seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
+        else:
+            seg_labels = seg_labels.long().to(device)
+
         depth_labels = batch['depth'].to(device)
 
         optimizer.zero_grad()
@@ -115,7 +122,12 @@ for epoch in range(num_epochs):
     with torch.no_grad():
         for batch in val_loader:
             images = batch['image'].to(device)
-            seg_labels = batch['track'].to(device)
+            seg_labels = batch['track']
+            if isinstance(seg_labels, np.ndarray):
+                seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
+            else:
+                seg_labels = seg_labels.long().to(device)
+
             depth_labels = batch['depth'].to(device)
 
             seg_logits, depth_pred = model(images)
