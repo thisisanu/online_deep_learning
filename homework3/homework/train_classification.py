@@ -10,6 +10,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 import torchvision.models as models
+from torchvision.models import resnet18, ResNet18_Weights
+
 
 # -----------------------------
 # Fix imports: add homework/ to sys.path
@@ -71,8 +73,8 @@ val_transforms = transforms.Compose([
 train_dataset = SuperTuxClassificationDataset(root_dir=args.data_dir, split="train", transform=train_transforms)
 val_dataset = SuperTuxClassificationDataset(root_dir=args.data_dir, split="val", transform=val_transforms)
 
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
-val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
+val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
 dataloaders = {"train": train_loader, "val": val_loader}
 dataset_sizes = {"train": len(train_dataset), "val": len(val_dataset)}
@@ -80,7 +82,10 @@ dataset_sizes = {"train": len(train_dataset), "val": len(val_dataset)}
 # -----------------------------
 # Model: ResNet18 backbone
 # -----------------------------
-model = models.resnet18(pretrained=True)
+
+weights = ResNet18_Weights.DEFAULT
+model = resnet18(weights=weights)
+
 model.fc = nn.Linear(model.fc.in_features, num_classes)
 model = model.to(device)
 
