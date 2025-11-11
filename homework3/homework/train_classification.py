@@ -109,17 +109,15 @@ print(f"\nTraining complete. Best val Acc: {best_acc:.4f}")
 # Save best model
 # -----------------------------
 model.load_state_dict(best_model_wts)
+model.eval()
 
 # Primary save (using existing helper)
 save_model(model)  # Saves to homework/classifier.th
 
 # Ensure safety copy in homework/ directory
 homework_dir = Path(__file__).resolve().parent
-weights_path = homework_dir / "classifier.th"
-
-# Save explicitly in case save_model missed it
-torch.save(model.state_dict(), weights_path)
+state_dict_path = homework_dir / "classifier.th"
+torch.save(model.state_dict(), state_dict_path)
 
 print(f"Saved model with validation accuracy: {best_acc:.3f}")
-print(f"Model weights saved to: {weights_path.resolve()}")
-
+print(f"Model weights saved to: {state_dict_path.resolve()}")
