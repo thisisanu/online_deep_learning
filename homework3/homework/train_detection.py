@@ -37,7 +37,6 @@ all_labels = []
 
 for sample in train_data:
     track = sample['track']
-    # Make contiguous copy to avoid negative strides
     if isinstance(track, np.ndarray):
         track = torch.from_numpy(track.copy()).long()
     else:
@@ -60,7 +59,7 @@ seg_criterion = nn.CrossEntropyLoss(weight=weights)
 depth_criterion = nn.L1Loss()
 optimizer = optim.Adam(model.parameters(), lr=lr)
 
-# Use new GradScaler syntax for PyTorch 2.1+
+# GradScaler for mixed precision
 scaler = torch.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
 
 # -----------------------
@@ -84,17 +83,15 @@ for epoch in range(num_epochs):
 
     for batch in train_loader:
         images = batch['image'].to(device)
-        
         seg_labels = batch['track']
         if isinstance(seg_labels, np.ndarray):
             seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
         else:
             seg_labels = seg_labels.long().to(device)
-        
         depth_labels = batch['depth'].to(device)
 
         optimizer.zero_grad()
-        with torch.amp.autocast(enabled=(mixed_precision and device.type=="cuda")):
+        with torch.amp.autocast(enabled=(mixed_precision and device.type=="cuda"), device_type=device.type):
             seg_logits, depth_pred = model(images)
             seg_loss = seg_criterion(seg_logits, seg_labels)
             depth_loss = depth_criterion(depth_pred.squeeze(1), depth_labels)
@@ -124,7 +121,6 @@ for epoch in range(num_epochs):
     with torch.no_grad():
         for batch in val_loader:
             images = batch['image'].to(device)
-            
             seg_labels = batch['track']
             if isinstance(seg_labels, np.ndarray):
                 seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
