@@ -23,8 +23,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Dataset and DataLoader
 # -----------------------
 data_dir = Path("drive_data")
-train_data = load_data(data_dir / "train")
-val_data = load_data(data_dir / "val")
+train_data = load_data(data_dir / "train",return_dataloader=False)
+val_data = load_data(data_dir / "val",return_dataloader=False)
 
 train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
@@ -141,6 +141,7 @@ for epoch in range(num_epochs):
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
     print(f"Final best model saved to {homework_model_path}")
+
 
 
 
