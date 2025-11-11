@@ -37,8 +37,8 @@ all_labels = []
 
 for sample in train_data:
     track = sample['track']
+    # Make contiguous copy to avoid negative strides
     if isinstance(track, np.ndarray):
-        # Make a contiguous copy to avoid negative stride issues
         track = torch.from_numpy(track.copy()).long()
     else:
         track = track.long()
@@ -46,8 +46,8 @@ for sample in train_data:
 
 all_labels = torch.cat(all_labels)
 
-class_counts = Counter(all_labels.tolist())
 num_classes = 3
+class_counts = Counter(all_labels.tolist())
 total = sum(class_counts.values())
 weights = [total / (num_classes * class_counts.get(cls, 1)) for cls in range(num_classes)]
 weights = torch.tensor(weights, device=device)
@@ -60,7 +60,8 @@ seg_criterion = nn.CrossEntropyLoss(weight=weights)
 depth_criterion = nn.L1Loss()
 optimizer = optim.Adam(model.parameters(), lr=lr)
 
-scaler = torch.cuda.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
+# Use new GradScaler syntax for PyTorch 2.1+
+scaler = torch.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
 
 # -----------------------
 # Track best model
@@ -83,16 +84,17 @@ for epoch in range(num_epochs):
 
     for batch in train_loader:
         images = batch['image'].to(device)
+        
         seg_labels = batch['track']
         if isinstance(seg_labels, np.ndarray):
             seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
         else:
             seg_labels = seg_labels.long().to(device)
-
+        
         depth_labels = batch['depth'].to(device)
 
         optimizer.zero_grad()
-        with torch.cuda.amp.autocast(enabled=(mixed_precision and device.type=="cuda")):
+        with torch.amp.autocast(enabled=(mixed_precision and device.type=="cuda")):
             seg_logits, depth_pred = model(images)
             seg_loss = seg_criterion(seg_logits, seg_labels)
             depth_loss = depth_criterion(depth_pred.squeeze(1), depth_labels)
@@ -122,6 +124,7 @@ for epoch in range(num_epochs):
     with torch.no_grad():
         for batch in val_loader:
             images = batch['image'].to(device)
+            
             seg_labels = batch['track']
             if isinstance(seg_labels, np.ndarray):
                 seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
@@ -156,11 +159,12 @@ for epoch in range(num_epochs):
     # -----------------------
     # Save checkpoint
     # -----------------------
+    checkpoint_path = checkpoint_dir / f"detector_epoch{epoch+1}.pt"
     torch.save({
         'epoch': epoch + 1,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-    }, checkpoint_dir / f"detector_epoch{epoch+1}.pt")
+    }, checkpoint_path)
 
     # -----------------------
     # Save best model safely
