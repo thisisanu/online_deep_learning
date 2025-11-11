@@ -3,10 +3,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from pathlib import Path
+from collections import Counter
+
 from homework.datasets.road_dataset import load_data
 from homework.models import Detector
 from homework.metrics import ConfusionMatrix
-from collections import Counter
 
 # -----------------------
 # Hyperparameters
@@ -16,16 +17,17 @@ lr = 1e-3
 num_epochs = 30
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 mixed_precision = True  # Enable FP16 training
+num_workers = 2  # safer for Colab
 
 # -----------------------
 # Dataset and DataLoader
 # -----------------------
-data_dir = Path("drive_data")
+data_dir = Path("/content/drive/MyDrive/online_deep_learning")  # adjust if needed
 train_data = load_data(data_dir / "train", transform_pipeline="aug", return_dataloader=False)
 val_data = load_data(data_dir / "val", transform_pipeline="default", return_dataloader=False)
 
-train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=4)
-val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=4)
+train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
 # -----------------------
 # Compute class weights for segmentation
@@ -36,10 +38,8 @@ for sample in train_data:
 all_labels = torch.cat(all_labels)
 class_counts = Counter(all_labels.tolist())
 num_classes = 3
-weights = [1.0] * num_classes
 total = sum(class_counts.values())
-for cls in range(num_classes):
-    weights[cls] = total / (num_classes * class_counts.get(cls, 1))
+weights = [total / (num_classes * class_counts.get(cls, 1)) for cls in range(num_classes)]
 weights = torch.tensor(weights, device=device)
 
 # -----------------------
@@ -50,15 +50,18 @@ seg_criterion = nn.CrossEntropyLoss(weight=weights)
 depth_criterion = nn.L1Loss()
 optimizer = optim.Adam(model.parameters(), lr=lr)
 
-scaler = torch.cuda.amp.GradScaler(enabled=mixed_precision)
+scaler = torch.cuda.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
 
 # -----------------------
 # Track best model
 # -----------------------
+homework_dir = Path.cwd()  # Colab-friendly
+homework_model_path = homework_dir / "detector.th"
+checkpoint_dir = homework_dir / "checkpoints"
+checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
 best_val_iou = 0.0
 best_model_wts = None
-homework_dir = Path(__file__).resolve().parent
-homework_model_path = homework_dir / "detector.th"
 
 # -----------------------
 # Training Loop
@@ -74,8 +77,7 @@ for epoch in range(num_epochs):
         depth_labels = batch['depth'].to(device)
 
         optimizer.zero_grad()
-
-        with torch.cuda.amp.autocast(enabled=mixed_precision):
+        with torch.cuda.amp.autocast(enabled=(mixed_precision and device.type=="cuda")):
             seg_logits, depth_pred = model(images)
             seg_loss = seg_criterion(seg_logits, seg_labels)
             depth_loss = depth_criterion(depth_pred.squeeze(1), depth_labels)
@@ -112,6 +114,7 @@ for epoch in range(num_epochs):
             seg_preds = seg_logits.argmax(dim=1)
 
             confusion.add(seg_preds, seg_labels)
+
             abs_diff = torch.abs(depth_pred.squeeze(1) - depth_labels)
             val_depth_error += abs_diff.sum().item()
             total_pixels += abs_diff.numel()
@@ -121,7 +124,7 @@ for epoch in range(num_epochs):
             total_boundary_pixels += boundary_mask.sum().item()
 
     val_depth_error /= total_pixels
-    val_depth_boundary_error /= total_boundary_pixels
+    val_depth_boundary_error = val_depth_boundary_error / total_boundary_pixels if total_boundary_pixels > 0 else 0.0
 
     metrics = confusion.compute()
     val_iou = metrics["iou"]
@@ -133,8 +136,6 @@ for epoch in range(num_epochs):
     # -----------------------
     # Save checkpoint
     # -----------------------
-    checkpoint_dir = homework_dir / "checkpoints"
-    checkpoint_dir.mkdir(exist_ok=True)
     torch.save({
         'epoch': epoch + 1,
         'model_state_dict': model.state_dict(),
