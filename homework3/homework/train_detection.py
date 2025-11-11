@@ -1,3 +1,5 @@
+import sys
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -22,7 +24,7 @@ sys.path.insert(0, str(homework_path))
 batch_size = 16
 lr_seg = 1e-3       # Segmentation LR
 lr_depth = 5e-4     # Depth LR
-num_epochs = 15     # Reduced from 30
+num_epochs = 10     # Reduced from 30
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 mixed_precision = True
 num_workers = 2
@@ -194,6 +196,7 @@ for epoch in range(num_epochs):
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
     print(f"Final best model saved to {homework_model_path}")
+
 
 
 
