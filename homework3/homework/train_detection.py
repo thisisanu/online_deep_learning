@@ -10,6 +10,12 @@ from homework.datasets.road_dataset import load_data
 from homework.models import Detector
 from homework.metrics import ConfusionMatrix
 
+# -----------------------------
+# Fix imports: add homework/ to sys.path
+# -----------------------------
+homework_path = Path(__file__).resolve().parent
+sys.path.insert(0, str(homework_path))
+
 # -----------------------
 # Hyperparameters
 # -----------------------
@@ -72,9 +78,8 @@ scaler = torch.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
 # -----------------------
 # Checkpoint paths
 # -----------------------
-homework_dir = Path.cwd()
-homework_model_path = homework_dir / "detector.th"
-checkpoint_dir = homework_dir / "checkpoints"
+homework_model_path = homework_path / "detector.th"
+checkpoint_dir = homework_path / "checkpoints"
 checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
 best_val_iou = 0.0
@@ -189,5 +194,6 @@ for epoch in range(num_epochs):
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
     print(f"Final best model saved to {homework_model_path}")
+
 
 
