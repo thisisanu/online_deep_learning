@@ -3,23 +3,10 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from pathlib import Path
-import sys
-
 from homework.datasets.road_dataset import load_data
 from homework.models import Detector
 from homework.metrics import ConfusionMatrix
-
-# -----------------------
-# Paths and setup
-# -----------------------
-HOMEWORK_ROOT = Path(__file__).resolve().parent
-sys.path.append(str(HOMEWORK_ROOT))
-data_dir = Path("drive_data")
-homework_model_path = HOMEWORK_ROOT / "detector.th"
-checkpoint_dir = HOMEWORK_ROOT / "checkpoints"
-checkpoint_dir.mkdir(exist_ok=True)
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from collections import Counter
 
 # -----------------------
 # Hyperparameters
@@ -27,30 +14,51 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 batch_size = 16
 lr = 1e-3
 num_epochs = 30
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+mixed_precision = True  # Enable FP16 training
 
 # -----------------------
 # Dataset and DataLoader
 # -----------------------
-train_data = load_data(data_dir / "train", return_dataloader=False)
-val_data = load_data(data_dir / "val", return_dataloader=False)
-train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
+data_dir = Path("drive_data")
+train_data = load_data(data_dir / "train", transform_pipeline="aug", return_dataloader=False)
+val_data = load_data(data_dir / "val", transform_pipeline="default", return_dataloader=False)
+
+train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=4)
+val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=4)
 
 # -----------------------
-# Model, loss, optimizer
+# Compute class weights for segmentation
 # -----------------------
-model = Detector().to(device)
+all_labels = []
+for sample in train_data:
+    all_labels.append(sample["track"].flatten())
+all_labels = torch.cat(all_labels)
+class_counts = Counter(all_labels.tolist())
+num_classes = 3
+weights = [1.0] * num_classes
+total = sum(class_counts.values())
+for cls in range(num_classes):
+    weights[cls] = total / (num_classes * class_counts.get(cls, 1))
+weights = torch.tensor(weights, device=device)
 
-# Weighted CE for class imbalance
-class_weights = torch.tensor([0.2, 0.4, 0.4], device=device)
-seg_criterion = nn.CrossEntropyLoss(weight=class_weights)
-depth_criterion = nn.L1Loss()  # MAE
-
+# -----------------------
+# Model, Loss, Optimizer
+# -----------------------
+model = Detector(in_channels=3, num_classes=num_classes).to(device)
+seg_criterion = nn.CrossEntropyLoss(weight=weights)
+depth_criterion = nn.L1Loss()
 optimizer = optim.Adam(model.parameters(), lr=lr)
 
+scaler = torch.cuda.amp.GradScaler(enabled=mixed_precision)
+
+# -----------------------
 # Track best model
+# -----------------------
 best_val_iou = 0.0
 best_model_wts = None
+homework_dir = Path(__file__).resolve().parent
+homework_model_path = homework_dir / "detector.th"
 
 # -----------------------
 # Training Loop
@@ -66,28 +74,29 @@ for epoch in range(num_epochs):
         depth_labels = batch['depth'].to(device)
 
         optimizer.zero_grad()
-        seg_logits, depth_pred = model(images)
 
-        seg_loss = seg_criterion(seg_logits, seg_labels)
-        depth_loss = depth_criterion(depth_pred, depth_labels)
-        loss = seg_loss + depth_loss
+        with torch.cuda.amp.autocast(enabled=mixed_precision):
+            seg_logits, depth_pred = model(images)
+            seg_loss = seg_criterion(seg_logits, seg_labels)
+            depth_loss = depth_criterion(depth_pred.squeeze(1), depth_labels)
+            loss = seg_loss + depth_loss
 
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         running_seg_loss += seg_loss.item() * images.size(0)
         running_depth_loss += depth_loss.item() * images.size(0)
 
-    avg_seg_loss = running_seg_loss / len(train_loader.dataset)
-    avg_depth_loss = running_depth_loss / len(train_loader.dataset)
-    print(f"[Epoch {epoch+1}/{num_epochs}] "
-          f"Seg Loss: {avg_seg_loss:.4f}, Depth Loss: {avg_depth_loss:.4f}")
+    print(f"Epoch {epoch+1}/{num_epochs}, "
+          f"Seg Loss: {running_seg_loss/len(train_loader.dataset):.4f}, "
+          f"Depth Loss: {running_depth_loss/len(train_loader.dataset):.4f}")
 
     # -----------------------
     # Validation
     # -----------------------
     model.eval()
-    confusion = ConfusionMatrix(num_classes=3)
+    confusion = ConfusionMatrix(num_classes=num_classes)
     val_depth_error = 0.0
     val_depth_boundary_error = 0.0
     total_pixels = 0
@@ -101,9 +110,9 @@ for epoch in range(num_epochs):
 
             seg_logits, depth_pred = model(images)
             seg_preds = seg_logits.argmax(dim=1)
-            confusion.add(seg_preds, seg_labels)
 
-            abs_diff = torch.abs(depth_pred - depth_labels)
+            confusion.add(seg_preds, seg_labels)
+            abs_diff = torch.abs(depth_pred.squeeze(1) - depth_labels)
             val_depth_error += abs_diff.sum().item()
             total_pixels += abs_diff.numel()
 
@@ -113,17 +122,19 @@ for epoch in range(num_epochs):
 
     val_depth_error /= total_pixels
     val_depth_boundary_error /= total_boundary_pixels
+
     metrics = confusion.compute()
     val_iou = metrics["iou"]
     val_acc = metrics["accuracy"]
 
-    print(f"[Val] IoU: {val_iou:.4f}, Accuracy: {val_acc:.4f}, "
-          f"Depth MAE: {val_depth_error:.4f}, "
-          f"Depth MAE (boundary): {val_depth_boundary_error:.4f}")
+    print(f"Val IoU: {val_iou:.4f}, Val Depth MAE: {val_depth_error:.4f}, "
+          f"Val Depth MAE (boundary): {val_depth_boundary_error:.4f}")
 
     # -----------------------
     # Save checkpoint
     # -----------------------
+    checkpoint_dir = homework_dir / "checkpoints"
+    checkpoint_dir.mkdir(exist_ok=True)
     torch.save({
         'epoch': epoch + 1,
         'model_state_dict': model.state_dict(),
@@ -131,17 +142,17 @@ for epoch in range(num_epochs):
     }, checkpoint_dir / f"detector_epoch{epoch+1}.pt")
 
     # -----------------------
-    # Save best model
+    # Save best model safely
     # -----------------------
     if val_iou > best_val_iou:
         best_val_iou = val_iou
         best_model_wts = model.state_dict()
         torch.save(best_model_wts, homework_model_path)
-        print(f"[INFO] Saved best model with IoU {best_val_iou:.4f} -> {homework_model_path}")
+        print(f"Saved best model with val IoU: {best_val_iou:.4f} -> {homework_model_path}")
 
 # -----------------------
-# Final save
+# Final save at end of training
 # -----------------------
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
-    print(f"[INFO] Final best model saved to {homework_model_path}")
+    print(f"Final best model saved to {homework_model_path}")
