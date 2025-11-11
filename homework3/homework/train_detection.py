@@ -96,8 +96,7 @@ for epoch in range(num_epochs):
             seg_logits, depth_pred = model(images)
             seg_preds = seg_logits.argmax(dim=1)
 
-            confusion.update(seg_labels.cpu().numpy(), seg_preds.cpu().numpy())
-
+            confusion.add(seg_preds, seg_labels)
             abs_diff = torch.abs(depth_pred.squeeze(1) - depth_labels)
             val_depth_error += abs_diff.sum().item()
             total_pixels += abs_diff.numel()
@@ -141,6 +140,7 @@ for epoch in range(num_epochs):
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
     print(f"Final best model saved to {homework_model_path}")
+
 
 
 
