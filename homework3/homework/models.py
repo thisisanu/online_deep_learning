@@ -1,25 +1,24 @@
-from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from pathlib import Path
 
 HOMEWORK_DIR = Path(__file__).resolve().parent
 INPUT_MEAN = [0.2788, 0.2657, 0.2629]
 INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
-# ──────────────────────────────────────────────────────────────
+# ───────────────────────────────
 # Classifier
-# ──────────────────────────────────────────────────────────────
+# ───────────────────────────────
 class Classifier(nn.Module):
     """
     Convolutional image classifier for the SuperTux dataset.
     """
-    def __init__(self, in_channels: int = 3, num_classes: int = 6):
+    def __init__(self, in_channels=3, num_classes=6):
         super().__init__()
-
-        self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
-        self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
+        self.register_buffer("input_mean", torch.tensor(INPUT_MEAN))
+        self.register_buffer("input_std", torch.tensor(INPUT_STD))
 
         self.conv_layers = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
@@ -51,19 +50,34 @@ class Classifier(nn.Module):
         return self(x).argmax(dim=1)
 
 
-# ──────────────────────────────────────────────────────────────
+# ───────────────────────────────
 # Detector (Segmentation + Depth)
-# ──────────────────────────────────────────────────────────────
+# ───────────────────────────────
 class ConvBlock(nn.Module):
-    """Helper block: Conv + BN + ReLU"""
-    def __init__(self, in_ch, out_ch, stride=1):
+    """Conv -> BN -> ReLU"""
+    def __init__(self, in_ch, out_ch):
         super().__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 3, stride=stride, padding=1, bias=False)
+        self.conv = nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False)
         self.bn = nn.BatchNorm2d(out_ch)
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
         return self.relu(self.bn(self.conv(x)))
+
+
+class UpBlock(nn.Module):
+    """Upsample with skip connection"""
+    def __init__(self, in_ch, skip_ch, out_ch):
+        super().__init__()
+        self.up = nn.ConvTranspose2d(in_ch, out_ch, 2, stride=2)
+        self.conv = ConvBlock(out_ch + skip_ch, out_ch)
+
+    def forward(self, x, skip):
+        x = self.up(x)
+        if x.shape[-2:] != skip.shape[-2:]:
+            x = F.interpolate(x, size=skip.shape[-2:], mode='bilinear', align_corners=False)
+        x = torch.cat([x, skip], dim=1)
+        return self.conv(x)
 
 
 class Detector(nn.Module):
@@ -74,39 +88,42 @@ class Detector(nn.Module):
       - logits: (B, 3, H, W)
       - depth:  (B, H, W)
     """
-    def __init__(self, in_channels: int = 3, num_classes: int = 3):
+    def __init__(self, in_channels=3, num_classes=3):
         super().__init__()
-
-        self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
-        self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
+        self.register_buffer("input_mean", torch.tensor(INPUT_MEAN))
+        self.register_buffer("input_std", torch.tensor(INPUT_STD))
 
         # Encoder
-        self.down1 = ConvBlock(in_channels, 16, stride=2)
-        self.down2 = ConvBlock(16, 32, stride=2)
-        self.down3 = ConvBlock(32, 64, stride=2)
+        self.down1 = ConvBlock(in_channels, 16)
+        self.down2 = ConvBlock(16, 32)
+        self.down3 = ConvBlock(32, 64)
+        self.pool = nn.MaxPool2d(2, 2)
 
         # Decoder
-        self.up1 = nn.ConvTranspose2d(64, 32, 2, stride=2)
-        self.up2 = nn.ConvTranspose2d(32, 16, 2, stride=2)
-        self.up3 = nn.ConvTranspose2d(16, 16, 2, stride=2)
+        self.up1 = UpBlock(64, 32, 32)
+        self.up2 = UpBlock(32, 16, 16)
 
-        # Output heads
+        # Heads
         self.seg_head = nn.Conv2d(16, num_classes, 1)
         self.depth_head = nn.Conv2d(16, 1, 1)
 
     def forward(self, x):
+        # Normalize input
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
-        x1 = self.down1(z)
-        x2 = self.down2(x1)
-        x3 = self.down3(x2)
+        # Encoder
+        d1 = self.down1(z)
+        d2 = self.down2(self.pool(d1))
+        d3 = self.down3(self.pool(d2))
 
-        x = F.relu(self.up1(x3))
-        x = F.relu(self.up2(x))
-        x = F.relu(self.up3(x))
+        # Decoder
+        u1 = self.up1(d3, d2)
+        u2 = self.up2(u1, d1)
 
-        logits = self.seg_head(x)
-        depth = self.depth_head(x).squeeze(1)  # (B, H, W)
+        # Heads
+        logits = self.seg_head(u2)
+        depth = torch.sigmoid(self.depth_head(u2)).squeeze(1)
+
         return logits, depth
 
     def predict(self, x):
@@ -114,46 +131,34 @@ class Detector(nn.Module):
         return logits.argmax(dim=1), depth
 
 
-# ──────────────────────────────────────────────────────────────
-# Model utilities
-# ──────────────────────────────────────────────────────────────
-MODEL_FACTORY = {
-    "classifier": Classifier,
-    "detector": Detector,
-}
+# ───────────────────────────────
+# Model Factory & Utilities
+# ───────────────────────────────
+MODEL_FACTORY = {"classifier": Classifier, "detector": Detector}
 
-
-def load_model(model_name: str, with_weights: bool = False, **model_kwargs) -> nn.Module:
-    """Loads model by name and optionally its weights."""
-    m = MODEL_FACTORY[model_name](**model_kwargs)
+def load_model(model_name: str, with_weights=False, **kwargs):
+    m = MODEL_FACTORY[model_name](**kwargs)
     if with_weights:
-        model_path = HOMEWORK_DIR / f"{model_name}.th"
-        assert model_path.exists(), f"{model_path.name} not found"
-        m.load_state_dict(torch.load(model_path, map_location="cpu"))
+        path = HOMEWORK_DIR / f"{model_name}.th"
+        assert path.exists(), f"{path} not found"
+        m.load_state_dict(torch.load(path, map_location="cpu"))
     return m
 
-
 def save_model(model: nn.Module) -> str:
-    """Save model weights to disk (classifier.th or detector.th)."""
-    model_name = None
-    for n, m in MODEL_FACTORY.items():
-        if isinstance(model, m):
-            model_name = n
-    if model_name is None:
-        raise ValueError(f"Unsupported model type: {type(model)}")
-
-    output_path = HOMEWORK_DIR / f"{model_name}.th"
-    torch.save(model.state_dict(), output_path)
-    print(f"[INFO] Saved model to {output_path}")
-    return str(output_path)
+    for name, cls in MODEL_FACTORY.items():
+        if isinstance(model, cls):
+            path = HOMEWORK_DIR / f"{name}.th"
+            torch.save(model.state_dict(), path)
+            print(f"[INFO] Saved model to {path}")
+            return str(path)
+    raise ValueError(f"Unsupported model type: {type(model)}")
 
 
-def calculate_model_size_mb(model: nn.Module) -> float:
-    return sum(p.numel() for p in model.parameters()) * 4 / 1024 / 1024
-
-
+# ───────────────────────────────
+# Debug
+# ───────────────────────────────
 def debug_model():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     sample = torch.rand(1, 3, 96, 128).to(device)
     model = Detector().to(device)
     model.eval()
