@@ -14,8 +14,9 @@ from homework.metrics import ConfusionMatrix
 # Hyperparameters
 # -----------------------
 batch_size = 16
-lr = 1e-3          # Single learning rate for all parameters
-num_epochs = 20     # Reduced to 20
+lr_seg = 1e-3       # Segmentation LR
+lr_depth = 5e-4     # Depth LR
+num_epochs = 20      # Reduced from 30
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 mixed_precision = True
 num_workers = 2
@@ -48,17 +49,24 @@ num_classes = 3
 class_counts = Counter(all_labels.tolist())
 print("Class counts:", class_counts)
 
-# Boost lane classes manually if needed
+# Simple weights to boost lane classes (1=lane, 2=curb)
 weights = torch.tensor([0.2, 1.0, 1.0], device=device)
 seg_criterion = nn.CrossEntropyLoss(weight=weights)
-depth_criterion = nn.L1Loss()
 print("Segmentation weights:", weights)
 
 # -----------------------
-# Model and optimizer
+# Model, Loss, Optimizer
 # -----------------------
 model = Detector(in_channels=3, num_classes=num_classes).to(device)
-optimizer = optim.Adam(model.parameters(), lr=lr)
+depth_criterion = nn.L1Loss()
+
+# Optimizer: separate LR for segmentation and depth outputs
+# Use all parameters if Detector does not expose separate heads
+optimizer = optim.Adam([
+    {'params': model.parameters(), 'lr': lr_seg}  # Simple, assumes one combined LR
+])
+
+# GradScaler for mixed precision
 scaler = torch.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
 
 # -----------------------
@@ -85,18 +93,20 @@ for epoch in range(num_epochs):
         seg_labels = batch['track']
         depth_labels = batch['depth'].to(device)
 
-        # Ensure labels are torch tensors on device
+        # Ensure labels are long and on device
         if isinstance(seg_labels, np.ndarray):
             seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
         else:
             seg_labels = seg_labels.long().to(device)
 
         optimizer.zero_grad()
-        with torch.amp.autocast(enabled=(mixed_precision and device.type=="cuda")):
+
+        # Proper autocast usage
+        with torch.amp.autocast(device_type=device.type, enabled=mixed_precision):
             seg_logits, depth_pred = model(images)
             seg_loss = seg_criterion(seg_logits, seg_labels)
             depth_loss = depth_criterion(depth_pred.squeeze(1), depth_labels)
-            # Re-weight losses: more emphasis on segmentation
+            # Weight losses (more emphasis on segmentation)
             loss = seg_loss * 1.5 + depth_loss * 0.5
 
         scaler.scale(loss).backward()
@@ -133,6 +143,7 @@ for epoch in range(num_epochs):
 
             seg_logits, depth_pred = model(images)
             seg_preds = seg_logits.argmax(dim=1)
+
             confusion.add(seg_preds, seg_labels)
 
             abs_diff = torch.abs(depth_pred.squeeze(1) - depth_labels)
