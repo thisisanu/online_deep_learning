@@ -23,7 +23,7 @@ from models import Classifier, save_model
 parser = argparse.ArgumentParser(description="Train SuperTux classification model")
 parser.add_argument("--data_dir", type=str, default="./classification_data", help="Path to dataset")
 parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-parser.add_argument("--epochs", type=int, default=20, help="Number of epochs")
+parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
 parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
 args = parser.parse_args()
 
