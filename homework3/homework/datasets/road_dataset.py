@@ -18,7 +18,8 @@ class RoadDataset(Dataset):
         # Load episode info
         info = np.load(self.episode_path / "info.npz", allow_pickle=True)
         self.track = Track(**info["track"].item())
-        self.frames: dict[str, np.ndarray] = {k: np.stack(v) for k, v in info["frames"].item()}
+        # Fixed: iterate over dictionary items
+        self.frames: dict[str, np.ndarray] = {k: np.stack(v) for k, v in info["frames"].item().items()}
 
         # Setup transform pipeline
         self.transform = self.get_transform(transform_pipeline)
