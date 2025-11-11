@@ -161,7 +161,8 @@ print(f"\nTraining complete. Best val Acc: {best_acc:.4f}")
 # Save best model
 # -----------------------------
 model.load_state_dict(best_model_wts)
-save_model(model)  # primary save
+# Save best model manually
 weights_path = homework_path / "classifier.th"
 torch.save(model.state_dict(), weights_path)
-print(f"Saved model to: {weights_path.resolve()}")
+print(f"Saved model weights to: {weights_path.resolve()}")
+
