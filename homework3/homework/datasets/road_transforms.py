@@ -263,3 +263,37 @@ class EgoTrackProcessor:
             "waypoints": waypoints.astype(np.float32),
             "waypoints_mask": waypoints_mask,
         }
+        
+# ---- Optional Albumentations transforms (for data augmentation) ----
+try:
+    import albumentations as A
+
+    class RandomBrightnessContrast:
+        """Wrapper for Albumentations RandomBrightnessContrast"""
+        def __init__(self, p=0.3):
+            self.aug = A.RandomBrightnessContrast(p=p)
+
+        def __call__(self, sample: dict):
+            image = sample.get("image")
+            if image is None:
+                return sample
+
+            # Albumentations expects HWC format, float32 or uint8
+            img_hwc = np.transpose(image, (1, 2, 0))
+            augmented = self.aug(image=img_hwc)
+            sample["image"] = np.transpose(augmented["image"], (2, 0, 1))
+            return sample
+
+except ImportError:
+    # fallback if albumentations not installed
+    class RandomBrightnessContrast:
+        def __init__(self, p=0.3):
+            self.p = p
+
+        def __call__(self, sample: dict):
+            # simple brightness jitter fallback
+            if np.random.rand() < self.p:
+                factor = np.random.uniform(0.8, 1.2)
+                sample["image"] = np.clip(sample["image"] * factor, 0, 1)
+            return sample
+
