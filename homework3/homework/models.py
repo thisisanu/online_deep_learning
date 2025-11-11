@@ -7,6 +7,28 @@ HOMEWORK_DIR = Path(__file__).resolve().parent
 INPUT_MEAN = [0.2788, 0.2657, 0.2629]
 INPUT_STD = [0.2064, 0.1944, 0.2252]
 
+# ───────────────────────────────
+# Residual Block
+# ───────────────────────────────
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.shortcut = nn.Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else nn.Identity()
+        self.bn_shortcut = nn.BatchNorm2d(out_channels) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x):
+        identity = self.bn_shortcut(self.shortcut(x))
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += identity
+        out = F.relu(out)
+        return out
+
 
 # ───────────────────────────────
 # Classifier
@@ -20,35 +42,43 @@ class Classifier(nn.Module):
         self.register_buffer("input_mean", torch.tensor(INPUT_MEAN))
         self.register_buffer("input_std", torch.tensor(INPUT_STD))
 
-        self.conv_layers = nn.Sequential(
-            nn.Conv2d(in_channels, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
-            nn.Conv2d(32, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
-            nn.MaxPool2d(2), nn.Dropout(0.25),
+        # Initial conv layer
+        self.conv0 = nn.Conv2d(in_channels, 32, 3, padding=1)
+        self.bn0 = nn.BatchNorm2d(32)
 
-            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
-            nn.Conv2d(64, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
-            nn.MaxPool2d(2), nn.Dropout(0.25),
+        # Residual blocks
+        self.res1 = ResidualBlock(32, 64)
+        self.pool1 = nn.MaxPool2d(2)
+        self.res2 = ResidualBlock(64, 128)
+        self.pool2 = nn.MaxPool2d(2)
+        self.res3 = ResidualBlock(128, 256)
+        self.pool3 = nn.MaxPool2d(2)
 
-            nn.Conv2d(64, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(),
-            nn.Conv2d(128, 128, 3, padding=1), nn.BatchNorm2d(128), nn.ReLU(),
-            nn.MaxPool2d(2), nn.Dropout(0.25),
-        )
-
-        self.feature_size = 128 * (64 // 8) * (64 // 8)
-        self.classifier = nn.Sequential(
-            nn.Linear(self.feature_size, 512), nn.ReLU(), nn.Dropout(0.5),
-            nn.Linear(512, num_classes)
-        )
+        # Fully connected classifier
+        self.feature_size = 256 * (64 // 8) * (64 // 8)
+        self.fc1 = nn.Linear(self.feature_size, 512)
+        self.dropout = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(512, num_classes)
 
     def forward(self, x):
+        # Normalize input
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
-        feats = self.conv_layers(z)
-        feats = torch.flatten(feats, 1)
-        return self.classifier(feats)
+
+        # Convolutional + residual layers
+        x = F.relu(self.bn0(self.conv0(z)))
+        x = self.pool1(self.res1(x))
+        x = self.pool2(self.res2(x))
+        x = self.pool3(self.res3(x))
+
+        # Flatten and classify
+        x = torch.flatten(x, 1)
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+        logits = self.fc2(x)
+        return logits
 
     def predict(self, x):
         return self(x).argmax(dim=1)
-
 
 # ───────────────────────────────
 # Detector (Segmentation + Depth)
