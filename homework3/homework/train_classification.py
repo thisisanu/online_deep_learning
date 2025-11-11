@@ -62,4 +62,65 @@ optimizer = optim.Adam(model.parameters(), lr=args.lr)
 # -----------------------------
 # Training loop
 # -----------------------------
-best_model_wts = copy.deepcopy(model.state_d_
+best_model_wts = copy.deepcopy(model.state_dict())
+best_acc = 0.0
+
+for epoch in range(args.epochs):
+    print(f"\nEpoch {epoch+1}/{args.epochs}")
+    print("-" * 20)
+
+    for phase in ["train", "val"]:
+        if phase == "train":
+            model.train()
+            loader = train_loader
+        else:
+            model.eval()
+            loader = val_loader
+
+        running_loss = 0.0
+        running_corrects = 0
+
+        for inputs, labels in loader:
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            optimizer.zero_grad()
+
+            with torch.set_grad_enabled(phase == "train"):
+                outputs = model(inputs)
+                _, preds = torch.max(outputs, 1)
+                loss = criterion(outputs, labels)
+
+                if phase == "train":
+                    loss.backward()
+                    optimizer.step()
+
+            running_loss += loss.item() * inputs.size(0)
+            running_corrects += torch.sum(preds == labels.data).item()
+
+        epoch_loss = running_loss / dataset_sizes[phase]
+        epoch_acc = running_corrects / dataset_sizes[phase]
+
+        print(f"{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
+
+        # Save best weights
+        if phase == "val" and epoch_acc > best_acc:
+            best_acc = epoch_acc
+            best_model_wts = copy.deepcopy(model.state_dict())
+
+print(f"\nTraining complete. Best val Acc: {best_acc:.4f}")
+
+# -----------------------------
+# Save best model
+# -----------------------------
+model.load_state_dict(best_model_wts)
+
+# Primary save (using existing helper)
+save_model(model)  # Saves to homework/classifier.th
+
+# Ensure explicit safety copy in homework/ directory
+weights_path = homework_path / "classifier.th"
+torch.save(model.state_dict(), weights_path)
+
+print(f"Saved model with validation accuracy: {best_acc:.3f}")
+print(f"Model weights saved to: {weights_path.resolve()}")
