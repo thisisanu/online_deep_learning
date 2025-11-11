@@ -14,9 +14,8 @@ from homework.metrics import ConfusionMatrix
 # Hyperparameters
 # -----------------------
 batch_size = 16
-lr_seg = 1e-3       # Segmentation LR
-lr_depth = 5e-4     # Depth LR
-num_epochs = 20     # Reduced
+lr = 1e-3          # Single learning rate for all parameters
+num_epochs = 20     # Reduced to 20
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 mixed_precision = True
 num_workers = 2
@@ -34,38 +33,36 @@ val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_work
 # -----------------------
 # Compute class weights for segmentation
 # -----------------------
+all_labels = []
+for sample in train_data:
+    track = sample['track']
+    if isinstance(track, np.ndarray):
+        track = torch.from_numpy(track.copy()).long()
+    else:
+        track = track.long()
+    all_labels.append(track.flatten())
+
+all_labels = torch.cat(all_labels)
+
 num_classes = 3
-# Boost lane classes
-weights = torch.tensor([0.1, 1.5, 1.5], device=device)
+class_counts = Counter(all_labels.tolist())
+print("Class counts:", class_counts)
+
+# Boost lane classes manually if needed
+weights = torch.tensor([0.2, 1.0, 1.0], device=device)
 seg_criterion = nn.CrossEntropyLoss(weight=weights)
+depth_criterion = nn.L1Loss()
+print("Segmentation weights:", weights)
 
 # -----------------------
-# Dice Loss function
-# -----------------------
-def dice_loss(pred, target, eps=1e-6):
-    pred = torch.softmax(pred, dim=1)
-    target_onehot = torch.nn.functional.one_hot(target, num_classes=pred.shape[1]).permute(0,3,1,2).float()
-    intersection = (pred * target_onehot).sum(dim=(2,3))
-    union = pred.sum(dim=(2,3)) + target_onehot.sum(dim=(2,3))
-    loss = 1 - (2 * intersection + eps) / (union + eps)
-    return loss.mean()
-
-# -----------------------
-# Model, Loss, Optimizer
+# Model and optimizer
 # -----------------------
 model = Detector(in_channels=3, num_classes=num_classes).to(device)
-depth_criterion = nn.L1Loss()
-
-optimizer = optim.Adam([
-    {'params': model.segmentation_head.parameters(), 'lr': lr_seg},
-    {'params': model.depth_head.parameters(), 'lr': lr_depth},
-])
-
+optimizer = optim.Adam(model.parameters(), lr=lr)
 scaler = torch.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
 
 # -----------------------
-# Checkpoints
+# Checkpoint paths
 # -----------------------
 homework_dir = Path.cwd()
 homework_model_path = homework_dir / "detector_best.th"
@@ -88,6 +85,7 @@ for epoch in range(num_epochs):
         seg_labels = batch['track']
         depth_labels = batch['depth'].to(device)
 
+        # Ensure labels are torch tensors on device
         if isinstance(seg_labels, np.ndarray):
             seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
         else:
@@ -96,10 +94,10 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
         with torch.amp.autocast(enabled=(mixed_precision and device.type=="cuda")):
             seg_logits, depth_pred = model(images)
-            seg_loss = seg_criterion(seg_logits, seg_labels) + dice_loss(seg_logits, seg_labels)
+            seg_loss = seg_criterion(seg_logits, seg_labels)
             depth_loss = depth_criterion(depth_pred.squeeze(1), depth_labels)
-            # Focus more on segmentation
-            loss = seg_loss * 2.0 + depth_loss * 0.5
+            # Re-weight losses: more emphasis on segmentation
+            loss = seg_loss * 1.5 + depth_loss * 0.5
 
         scaler.scale(loss).backward()
         scaler.step(optimizer)
@@ -107,8 +105,6 @@ for epoch in range(num_epochs):
 
         running_seg_loss += seg_loss.item() * images.size(0)
         running_depth_loss += depth_loss.item() * images.size(0)
-
-    scheduler.step()  # Update LR
 
     print(f"Epoch {epoch+1}/{num_epochs}, "
           f"Seg Loss: {running_seg_loss/len(train_loader.dataset):.4f}, "
@@ -137,7 +133,6 @@ for epoch in range(num_epochs):
 
             seg_logits, depth_pred = model(images)
             seg_preds = seg_logits.argmax(dim=1)
-
             confusion.add(seg_preds, seg_labels)
 
             abs_diff = torch.abs(depth_pred.squeeze(1) - depth_labels)
