@@ -99,7 +99,7 @@ class ClassifierGrader(BaseGrader):
 
         self.data = classification_dataset.load_data(
             CLASSIFICATION_DATA_SPLIT,
-            num_workers=1,
+            num_workers=2,
             batch_size=64,
             shuffle=False,
             transform_pipeline="default",
