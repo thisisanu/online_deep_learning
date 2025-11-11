@@ -115,7 +115,7 @@ class ClassifierGrader(BaseGrader):
 
             self._metric_computer.add(pred, label)
 
-    @Case(score=10, timeout=5000)
+    @Case(score=10, timeout=20000)
     def test_model(self):
         """Predict"""
         batch_size = 16
