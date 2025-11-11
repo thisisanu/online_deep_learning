@@ -14,11 +14,12 @@ from homework.metrics import ConfusionMatrix
 # Hyperparameters
 # -----------------------
 batch_size = 16
-lr = 1e-3
+lr_seg = 1e-3       # Segmentation LR
+lr_depth = 5e-4     # Depth LR
 num_epochs = 30
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-mixed_precision = True  # Enable FP16 training
-num_workers = 2  # safer for Colab
+mixed_precision = True
+num_workers = 2
 
 # -----------------------
 # Dataset and DataLoader
@@ -34,7 +35,6 @@ val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_work
 # Compute class weights for segmentation
 # -----------------------
 all_labels = []
-
 for sample in train_data:
     track = sample['track']
     if isinstance(track, np.ndarray):
@@ -47,26 +47,32 @@ all_labels = torch.cat(all_labels)
 
 num_classes = 3
 class_counts = Counter(all_labels.tolist())
-total = sum(class_counts.values())
-weights = [total / (num_classes * class_counts.get(cls, 1)) for cls in range(num_classes)]
-weights = torch.tensor(weights, device=device)
+print("Class counts:", class_counts)
+
+# Boost lane classes
+weights = torch.tensor([0.2, 1.0, 1.0], device=device)
+seg_criterion = nn.CrossEntropyLoss(weight=weights)
+print("Segmentation weights:", weights)
 
 # -----------------------
 # Model, Loss, Optimizer
 # -----------------------
 model = Detector(in_channels=3, num_classes=num_classes).to(device)
-seg_criterion = nn.CrossEntropyLoss(weight=weights)
 depth_criterion = nn.L1Loss()
-optimizer = optim.Adam(model.parameters(), lr=lr)
 
-# GradScaler for mixed precision
+# Optional: separate LR for heads
+optimizer = optim.Adam([
+    {'params': model.segmentation_head.parameters(), 'lr': lr_seg},
+    {'params': model.depth_head.parameters(), 'lr': lr_depth},
+])
+
 scaler = torch.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
 
 # -----------------------
-# Track best model
+# Checkpoint paths
 # -----------------------
-homework_dir = Path.cwd()  # Colab-friendly
-homework_model_path = homework_dir / "detector.th"
+homework_dir = Path.cwd()
+homework_model_path = homework_dir / "detector_best.th"
 checkpoint_dir = homework_dir / "checkpoints"
 checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -84,18 +90,21 @@ for epoch in range(num_epochs):
     for batch in train_loader:
         images = batch['image'].to(device)
         seg_labels = batch['track']
+        depth_labels = batch['depth'].to(device)
+
+        # Ensure labels are long and on device
         if isinstance(seg_labels, np.ndarray):
             seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
         else:
             seg_labels = seg_labels.long().to(device)
-        depth_labels = batch['depth'].to(device)
 
         optimizer.zero_grad()
-        with torch.amp.autocast(enabled=(mixed_precision and device.type=="cuda"), device_type=device.type):
+        with torch.amp.autocast(enabled=(mixed_precision and device.type=="cuda")):
             seg_logits, depth_pred = model(images)
             seg_loss = seg_criterion(seg_logits, seg_labels)
             depth_loss = depth_criterion(depth_pred.squeeze(1), depth_labels)
-            loss = seg_loss + depth_loss
+            # Re-weight losses: more emphasis on segmentation
+            loss = seg_loss * 1.5 + depth_loss * 0.5
 
         scaler.scale(loss).backward()
         scaler.step(optimizer)
@@ -122,12 +131,12 @@ for epoch in range(num_epochs):
         for batch in val_loader:
             images = batch['image'].to(device)
             seg_labels = batch['track']
+            depth_labels = batch['depth'].to(device)
+
             if isinstance(seg_labels, np.ndarray):
                 seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
             else:
                 seg_labels = seg_labels.long().to(device)
-
-            depth_labels = batch['depth'].to(device)
 
             seg_logits, depth_pred = model(images)
             seg_preds = seg_logits.argmax(dim=1)
@@ -163,7 +172,7 @@ for epoch in range(num_epochs):
     }, checkpoint_path)
 
     # -----------------------
-    # Save best model safely
+    # Save best model
     # -----------------------
     if val_iou > best_val_iou:
         best_val_iou = val_iou
@@ -172,7 +181,7 @@ for epoch in range(num_epochs):
         print(f"Saved best model with val IoU: {best_val_iou:.4f} -> {homework_model_path}")
 
 # -----------------------
-# Final save at end of training
+# Final save
 # -----------------------
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
