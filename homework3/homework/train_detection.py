@@ -107,8 +107,12 @@ for epoch in range(num_epochs):
 
     val_depth_error /= total_pixels
     val_depth_boundary_error /= total_boundary_pixels
-    val_iou = confusion.mean_iou()
 
+    # Compute metrics
+    metrics = confusion.compute()
+    val_iou = metrics["iou"]
+    val_acc = metrics["accuracy"]
+    
     print(f"Val IoU: {val_iou:.4f}, Val Depth MAE: {val_depth_error:.4f}, "
           f"Val Depth MAE (boundary): {val_depth_boundary_error:.4f}")
 
@@ -140,6 +144,7 @@ for epoch in range(num_epochs):
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
     print(f"Final best model saved to {homework_model_path}")
+
 
 
 
