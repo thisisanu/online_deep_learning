@@ -58,20 +58,17 @@ class RoadDataset(Dataset):
     def __len__(self):
         return len(self.frames["location"])
 
-    def __getitem__(self, idx: int):
-        """
-        Returns:
-            dict: sample data with keys "image", "depth", "track"
-        """
-        sample = {"_idx": idx, "_frames": self.frames}
-        sample = self.transform(sample)
+    def __getitem__(self, idx):
+    sample = self.data[idx]  # however you load your dict
 
-        # remove private keys
-        for key in list(sample.keys()):
-            if key.startswith("_"):
-                sample.pop(key)
+    # Make sure arrays are contiguous
+    for key in ['image', 'track', 'depth']:
+        val = sample[key]
+        if isinstance(val, np.ndarray):
+            sample[key] = val.copy()  # contiguous copy
 
-        return sample
+    return sample
+
 
 
 def load_data(
