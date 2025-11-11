@@ -43,3 +43,75 @@ class RoadDataset(Dataset):
                 [
                     road_transforms.ImageLoader(self.episode_path),
                     road_transforms.DepthLoader(self.episode_path),
+                    road_transforms.TrackProcessor(self.track),
+                    road_transforms.RandomHorizontalFlip(p=0.5),
+                    road_transforms.RandomBrightnessContrast(p=0.3),
+                    road_transforms.RandomRotate(limit=15, p=0.3),
+                ]
+            )
+        else:
+            raise ValueError(f"Invalid transform '{transform_pipeline}' specified!")
+
+        return xform
+
+    def __len__(self):
+        return len(self.frames["location"])
+
+    def __getitem__(self, idx):
+        # Build the sample dictionary from frames
+        sample = {k: self.frames[k][idx] for k in self.frames}
+
+        # Apply transforms
+        if self.transform:
+            sample = self.transform(sample)
+
+        # Ensure all numpy arrays are contiguous (avoids negative stride errors)
+        for key in ['image', 'track', 'depth']:
+            if key in sample and isinstance(sample[key], np.ndarray):
+                sample[key] = sample[key].copy()
+
+        return sample
+
+
+def load_data(
+    dataset_path: str,
+    transform_pipeline: str = "default",
+    return_dataloader: bool = True,
+    num_workers: int = 2,
+    batch_size: int = 32,
+    shuffle: bool = False,
+) -> DataLoader | Dataset:
+    """
+    Constructs the dataset/dataloader.
+    Args:
+        dataset_path (str): root folder containing episodes
+        transform_pipeline (str): 'default' or 'aug'
+        return_dataloader (bool): returns either DataLoader or Dataset
+        num_workers (int): data workers
+        batch_size (int): batch size
+        shuffle (bool): shuffle dataset for training
+    Returns:
+        DataLoader or Dataset
+    """
+    dataset_path = Path(dataset_path)
+    scenes = [x for x in dataset_path.iterdir() if x.is_dir()]
+
+    if not scenes and dataset_path.is_dir():
+        scenes = [dataset_path]
+
+    datasets = []
+    for episode_path in sorted(scenes):
+        datasets.append(RoadDataset(episode_path, transform_pipeline=transform_pipeline))
+    dataset = ConcatDataset(datasets)
+
+    print(f"Loaded {len(dataset)} samples from {len(datasets)} episodes")
+
+    if not return_dataloader:
+        return dataset
+
+    return DataLoader(
+        dataset,
+        num_workers=num_workers,
+        batch_size=batch_size,
+        shuffle=shuffle,
+    )
