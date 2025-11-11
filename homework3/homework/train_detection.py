@@ -4,6 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from pathlib import Path
 from collections import Counter
+import numpy as np  # needed for numpy array checks
 
 from homework.datasets.road_dataset import load_data
 from homework.models import Detector
@@ -16,8 +17,8 @@ batch_size = 16
 lr = 1e-3
 num_epochs = 30
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-mixed_precision = True  # Enable FP16 training
-num_workers = 2  # safer for Colab
+mixed_precision = True
+num_workers = 2
 
 # -----------------------
 # Dataset and DataLoader
@@ -33,14 +34,22 @@ val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_work
 # Compute class weights for segmentation
 # -----------------------
 all_labels = []
+
 for sample in train_data:
-    all_labels.append(sample["track"].flatten())
+    track = sample['track']
+
+    # Ensure it's a tensor
+    if isinstance(track, np.ndarray):
+        track = torch.from_numpy(track).long()
+    all_labels.append(track.flatten())
+
 all_labels = torch.cat(all_labels)
-class_counts = Counter(all_labels.tolist())
+
 num_classes = 3
+class_counts = Counter(all_labels.tolist())
 total = sum(class_counts.values())
 weights = [total / (num_classes * class_counts.get(cls, 1)) for cls in range(num_classes)]
-weights = torch.tensor(weights, device=device)
+weights = torch.tensor(weights, device=device, dtype=torch.float)
 
 # -----------------------
 # Model, Loss, Optimizer
@@ -49,13 +58,12 @@ model = Detector(in_channels=3, num_classes=num_classes).to(device)
 seg_criterion = nn.CrossEntropyLoss(weight=weights)
 depth_criterion = nn.L1Loss()
 optimizer = optim.Adam(model.parameters(), lr=lr)
-
 scaler = torch.cuda.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
 
 # -----------------------
 # Track best model
 # -----------------------
-homework_dir = Path.cwd()  # Colab-friendly
+homework_dir = Path.cwd()
 homework_model_path = homework_dir / "detector.th"
 checkpoint_dir = homework_dir / "checkpoints"
 checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -157,6 +165,3 @@ for epoch in range(num_epochs):
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
     print(f"Final best model saved to {homework_model_path}")
-
-
-
