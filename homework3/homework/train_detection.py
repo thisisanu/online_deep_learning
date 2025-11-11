@@ -22,7 +22,7 @@ num_workers = 2  # safer for Colab
 # -----------------------
 # Dataset and DataLoader
 # -----------------------
-data_dir = Path("./drive_data")  # adjust if needed
+data_dir = Path("drive_data")  # adjust if needed
 train_data = load_data(data_dir / "train", transform_pipeline="aug", return_dataloader=False)
 val_data = load_data(data_dir / "val", transform_pipeline="default", return_dataloader=False)
 
@@ -157,4 +157,5 @@ for epoch in range(num_epochs):
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
     print(f"Final best model saved to {homework_model_path}")
+
 
