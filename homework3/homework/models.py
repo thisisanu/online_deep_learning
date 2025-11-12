@@ -162,7 +162,8 @@ def load_model(model_name: str, with_weights=False, **kwargs):
     if with_weights:
         path = HOMEWORK_DIR / f"{model_name}.th"
         assert path.exists(), f"{path} not found"
-        m.load_state_dict(torch.load(path, map_location="cpu"))
+        state_dict = torch.load(path, map_location="cpu")
+        m.load_state_dict(state_dict, strict=False)
     return m
 
 def save_model(model: nn.Module) -> str:
