@@ -1,9 +1,7 @@
 import sys
 import os
-import argparse
 import copy
 from pathlib import Path
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -12,44 +10,34 @@ import torchvision.transforms as transforms
 from torchvision.models import resnet18, ResNet18_Weights
 
 # -----------------------------
-# Fix imports: add homework/ to sys.path
+# Fix imports
 # -----------------------------
 homework_path = Path(__file__).resolve().parent
 sys.path.insert(0, str(homework_path))
 
-# Import local modules
 from datasets.classification_dataset import SuperTuxClassificationDataset, get_class_names
-from models import save_model
 
 # -----------------------------
-# Argument parser
+# Hyperparameters
 # -----------------------------
-parser = argparse.ArgumentParser(description="Train SuperTux classification model")
-parser.add_argument("--data_dir", type=str, default="./classification_data", help="Path to dataset")
-parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
-parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-args = parser.parse_args()
+DATA_DIR = "./classification_data"
+BATCH_SIZE = 64
+EPOCHS = 15
+LR = 1e-4
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # -----------------------------
-# Device
+# Classes
 # -----------------------------
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-
-# -----------------------------
-# Get class names from labels.csv
-# -----------------------------
-print("[train_classification] Looking for labels.csv at:", os.path.join(args.data_dir, "train", "labels.csv"))
-class_names = get_class_names(args.data_dir, split="train")
+class_names = get_class_names(DATA_DIR, split="train")
 num_classes = len(class_names)
 print(f"Found classes: {class_names}")
 
 # -----------------------------
-# Data transformations
+# Data transforms
 # -----------------------------
 train_transforms = transforms.Compose([
-    transforms.RandomResizedCrop(224),
+    transforms.Resize((224, 224)),
     transforms.RandomHorizontalFlip(),
     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
     transforms.ToTensor(),
@@ -58,55 +46,46 @@ train_transforms = transforms.Compose([
 ])
 
 val_transforms = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(224),
+    transforms.Resize((224, 224)),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406],
                          std=[0.229, 0.224, 0.225])
 ])
 
 # -----------------------------
-# Datasets and loaders
+# Dataset & loaders
 # -----------------------------
-train_dataset = SuperTuxClassificationDataset(root_dir=args.data_dir, split="train", transform=train_transforms)
-val_dataset = SuperTuxClassificationDataset(root_dir=args.data_dir, split="val", transform=val_transforms)
+train_dataset = SuperTuxClassificationDataset(DATA_DIR, split="train", transform=train_transforms)
+val_dataset = SuperTuxClassificationDataset(DATA_DIR, split="val", transform=val_transforms)
 
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
-val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
+val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
 
-dataloaders = {"train": train_loader, "val": val_loader}
 dataset_sizes = {"train": len(train_dataset), "val": len(val_dataset)}
 
 # -----------------------------
-# Model: ResNet18 backbone
+# Model
 # -----------------------------
 weights = ResNet18_Weights.DEFAULT
 model = resnet18(weights=weights)
 model.fc = nn.Linear(model.fc.in_features, num_classes)
-model = model.to(device)
+model = model.to(DEVICE)
 
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=args.lr)
+optimizer = optim.Adam(model.parameters(), lr=LR)
 
 # -----------------------------
-# Sanity check: inspect a batch
+# Sanity check
 # -----------------------------
-print("\n[Sanity Check] Running one batch through the model...")
-sample_inputs, sample_labels = next(iter(train_loader))
-print(f"Input batch shape: {sample_inputs.shape}")
-print(f"Labels shape: {sample_labels.shape}")
-
-sample_inputs = sample_inputs.to(device)
-sample_labels = sample_labels.to(device)
-
+print("\n[Sanity Check] Running one batch...")
+inputs, labels = next(iter(train_loader))
+inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
 model.eval()
-with torch.no_grad():  # <-- changed from inference_mode to no_grad
-    outputs = model(sample_inputs)
-    print(f"Output logits shape: {outputs.shape}")
+with torch.inference_mode():
+    outputs = model(inputs)
     _, preds = torch.max(outputs, 1)
-    print(f"Predicted classes shape: {preds.shape}")
-
-print("[Sanity Check] Passed!\n")
+    print(f"Input: {inputs.shape}, Output: {outputs.shape}, Preds: {preds.shape}")
+print("[Sanity Check Passed]\n")
 
 # -----------------------------
 # Training loop
@@ -114,10 +93,8 @@ print("[Sanity Check] Passed!\n")
 best_model_wts = copy.deepcopy(model.state_dict())
 best_acc = 0.0
 
-for epoch in range(args.epochs):
-    print(f"\nEpoch {epoch+1}/{args.epochs}")
-    print("-" * 20)
-
+for epoch in range(EPOCHS):
+    print(f"Epoch {epoch+1}/{EPOCHS}\n" + "-"*25)
     for phase in ["train", "val"]:
         if phase == "train":
             model.train()
@@ -130,15 +107,13 @@ for epoch in range(args.epochs):
         running_corrects = 0
 
         for inputs, labels in loader:
-            inputs = inputs.to(device)
-            labels = labels.to(device)
-
+            inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
             optimizer.zero_grad()
-            with torch.set_grad_enabled(phase == "train"):
+
+            with torch.set_grad_enabled(phase=="train"):
                 outputs = model(inputs)
                 _, preds = torch.max(outputs, 1)
                 loss = criterion(outputs, labels)
-
                 if phase == "train":
                     loss.backward()
                     optimizer.step()
@@ -151,7 +126,7 @@ for epoch in range(args.epochs):
 
         print(f"{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
-        # Save best weights
+        # Save best model
         if phase == "val" and epoch_acc > best_acc:
             best_acc = epoch_acc
             best_model_wts = copy.deepcopy(model.state_dict())
@@ -159,9 +134,9 @@ for epoch in range(args.epochs):
 print(f"\nTraining complete. Best val Acc: {best_acc:.4f}")
 
 # -----------------------------
-# Save best model
+# Save model
 # -----------------------------
 model.load_state_dict(best_model_wts)
-weights_path = homework_path / "classifier.th"
-torch.save(model.state_dict(), weights_path)
-print(f"Saved model weights to: {weights_path.resolve()}")
+save_path = homework_path / "classifier.th"
+torch.save(model.state_dict(), save_path)
+print(f"Saved model weights to: {save_path.resolve()}")
