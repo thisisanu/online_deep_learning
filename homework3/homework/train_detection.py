@@ -24,7 +24,7 @@ sys.path.insert(0, str(homework_path))
 batch_size = 16
 lr_seg = 1e-3       # Segmentation LR
 lr_depth = 5e-4     # Depth LR
-num_epochs = 25     # Reduced from 30
+num_epochs = 25     # Can go to 30 for best performance
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 mixed_precision = True
 num_workers = 2
@@ -52,13 +52,12 @@ for sample in train_data:
     all_labels.append(track.flatten())
 
 all_labels = torch.cat(all_labels)
-
 num_classes = 3
 class_counts = Counter(all_labels.tolist())
 print("Class counts:", class_counts)
 
-# Simple weights to boost lane classes (1=lane, 2=curb)
-weights = torch.tensor([0.2, 1.0, 1.0], device=device)
+# Boost underrepresented classes (lane=1, curb=2)
+weights = torch.tensor([0.1, 1.2, 1.3], device=device)
 seg_criterion = nn.CrossEntropyLoss(weight=weights)
 print("Segmentation weights:", weights)
 
@@ -68,14 +67,10 @@ print("Segmentation weights:", weights)
 model = Detector(in_channels=3, num_classes=num_classes).to(device)
 depth_criterion = nn.L1Loss()
 
-# Optimizer: separate LR for segmentation and depth outputs
-# Use all parameters if Detector does not expose separate heads
-optimizer = optim.Adam([
-    {'params': model.parameters(), 'lr': lr_seg}  # Simple, assumes one combined LR
-])
+optimizer = optim.Adam(model.parameters(), lr=lr_seg)
 
 # GradScaler for mixed precision
-scaler = torch.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
+scaler = torch.amp.GradScaler(enabled=(mixed_precision and device.type == "cuda"))
 
 # -----------------------
 # Checkpoint paths
@@ -84,7 +79,7 @@ homework_model_path = homework_path / "detector.th"
 checkpoint_dir = homework_path / "checkpoints"
 checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-best_val_iou = 0.0
+best_val_acc = 0.0
 best_model_wts = None
 
 # -----------------------
@@ -100,7 +95,6 @@ for epoch in range(num_epochs):
         seg_labels = batch['track']
         depth_labels = batch['depth'].to(device)
 
-        # Ensure labels are long and on device
         if isinstance(seg_labels, np.ndarray):
             seg_labels = torch.from_numpy(seg_labels.copy()).long().to(device)
         else:
@@ -113,8 +107,8 @@ for epoch in range(num_epochs):
             seg_logits, depth_pred = model(images)
             seg_loss = seg_criterion(seg_logits, seg_labels)
             depth_loss = depth_criterion(depth_pred.squeeze(1), depth_labels)
-            # Weight losses (more emphasis on segmentation)
-            loss = seg_loss * 1.5 + depth_loss * 0.5
+            # Prioritize segmentation accuracy
+            loss = seg_loss * 2.0 + depth_loss * 0.25
 
         scaler.scale(loss).backward()
         scaler.step(optimizer)
@@ -162,13 +156,16 @@ for epoch in range(num_epochs):
             total_boundary_pixels += boundary_mask.sum().item()
 
     val_depth_error /= total_pixels
-    val_depth_boundary_error = val_depth_boundary_error / total_boundary_pixels if total_boundary_pixels > 0 else 0.0
+    val_depth_boundary_error = (
+        val_depth_boundary_error / total_boundary_pixels if total_boundary_pixels > 0 else 0.0
+    )
 
     metrics = confusion.compute()
     val_iou = metrics["iou"]
     val_acc = metrics["accuracy"]
 
-    print(f"Val IoU: {val_iou:.4f}, Val Depth MAE: {val_depth_error:.4f}, "
+    print(f"Val ACC: {val_acc:.4f}, Val IoU: {val_iou:.4f}, "
+          f"Val Depth MAE: {val_depth_error:.4f}, "
           f"Val Depth MAE (boundary): {val_depth_boundary_error:.4f}")
 
     # -----------------------
@@ -182,22 +179,17 @@ for epoch in range(num_epochs):
     }, checkpoint_path)
 
     # -----------------------
-    # Save best model
+    # Save best model (by accuracy)
     # -----------------------
-    if val_iou > best_val_iou:
-        best_val_iou = val_iou
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
         best_model_wts = model.state_dict()
         torch.save(best_model_wts, homework_model_path)
-        print(f"Saved best model with val IoU: {best_val_iou:.4f} -> {homework_model_path}")
+        print(f"✅ Saved best model with val ACC: {best_val_acc:.4f} -> {homework_model_path}")
 
 # -----------------------
 # Final save
 # -----------------------
 if best_model_wts is not None:
     torch.save(best_model_wts, homework_model_path)
-    print(f"Final best model saved to {homework_model_path}")
-
-
-
-
-
+    print(f"🎉 Final best model (ACC={best_val_acc:.4f}) saved to {homework_model_path}")
