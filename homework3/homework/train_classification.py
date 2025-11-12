@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
+from torchvision.models import resnet18, ResNet18_Weights
 
 # -----------------------------
 # Fix imports: add homework/ to sys.path
@@ -18,16 +19,16 @@ sys.path.insert(0, str(homework_path))
 
 # Import local modules
 from datasets.classification_dataset import SuperTuxClassificationDataset, get_class_names
-from models import Classifier, save_model
+from models import save_model
 
 # -----------------------------
 # Argument parser
 # -----------------------------
-parser = argparse.ArgumentParser(description="Train SuperTux classification model (Custom Classifier)")
+parser = argparse.ArgumentParser(description="Train SuperTux classification model")
 parser.add_argument("--data_dir", type=str, default="./classification_data", help="Path to dataset")
 parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-parser.add_argument("--epochs", type=int, default=15, help="Number of epochs")
-parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
+parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
 args = parser.parse_args()
 
 # -----------------------------
@@ -48,16 +49,20 @@ print(f"Found classes: {class_names}")
 # Data transformations
 # -----------------------------
 train_transforms = transforms.Compose([
-    transforms.RandomResizedCrop(64),
+    transforms.RandomResizedCrop(224),
     transforms.RandomHorizontalFlip(),
     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-    transforms.ToTensor()
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
 ])
 
 val_transforms = transforms.Compose([
-    transforms.Resize(72),
-    transforms.CenterCrop(64),
-    transforms.ToTensor()
+    transforms.Resize(256),
+    transforms.CenterCrop(224),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])
 ])
 
 # -----------------------------
@@ -73,14 +78,18 @@ dataloaders = {"train": train_loader, "val": val_loader}
 dataset_sizes = {"train": len(train_dataset), "val": len(val_dataset)}
 
 # -----------------------------
-# Model, Loss, Optimizer
+# Model: ResNet18 backbone
 # -----------------------------
-model = Classifier(in_channels=3, num_classes=num_classes).to(device)
+weights = ResNet18_Weights.DEFAULT
+model = resnet18(weights=weights)
+model.fc = nn.Linear(model.fc.in_features, num_classes)
+model = model.to(device)
+
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
 # -----------------------------
-# Sanity check
+# Sanity check: inspect a batch
 # -----------------------------
 print("\n[Sanity Check] Running one batch through the model...")
 sample_inputs, sample_labels = next(iter(train_loader))
@@ -91,11 +100,12 @@ sample_inputs = sample_inputs.to(device)
 sample_labels = sample_labels.to(device)
 
 model.eval()
-with torch.inference_mode():
+with torch.no_grad():  # <-- changed from inference_mode to no_grad
     outputs = model(sample_inputs)
     print(f"Output logits shape: {outputs.shape}")
-    preds = outputs.argmax(dim=1)
+    _, preds = torch.max(outputs, 1)
     print(f"Predicted classes shape: {preds.shape}")
+
 print("[Sanity Check] Passed!\n")
 
 # -----------------------------
@@ -106,7 +116,7 @@ best_acc = 0.0
 
 for epoch in range(args.epochs):
     print(f"\nEpoch {epoch+1}/{args.epochs}")
-    print("-" * 25)
+    print("-" * 20)
 
     for phase in ["train", "val"]:
         if phase == "train":
@@ -139,20 +149,19 @@ for epoch in range(args.epochs):
         epoch_loss = running_loss / dataset_sizes[phase]
         epoch_acc = running_corrects / dataset_sizes[phase]
 
-        print(f"{phase.capitalize()} Loss: {epoch_loss:.4f}  Acc: {epoch_acc:.4f}")
+        print(f"{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
-        # Save best model weights
+        # Save best weights
         if phase == "val" and epoch_acc > best_acc:
             best_acc = epoch_acc
             best_model_wts = copy.deepcopy(model.state_dict())
-            print(f"✅ New best model found with Acc: {best_acc:.4f}")
 
-print(f"\nTraining complete. Best Val Acc: {best_acc:.4f}")
+print(f"\nTraining complete. Best val Acc: {best_acc:.4f}")
 
 # -----------------------------
 # Save best model
 # -----------------------------
 model.load_state_dict(best_model_wts)
-save_path = homework_path / "classifier.th"
-torch.save(model.state_dict(), save_path)
-print(f"[INFO] Saved best model weights to: {save_path.resolve()}")
+weights_path = homework_path / "classifier.th"
+torch.save(model.state_dict(), weights_path)
+print(f"Saved model weights to: {weights_path.resolve()}")
