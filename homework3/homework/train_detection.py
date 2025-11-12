@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 from collections import Counter
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,7 +15,7 @@ homework_path = Path(__file__).resolve().parent
 sys.path.insert(0, str(homework_path))
 
 from homework.datasets.road_dataset import load_data
-from homework.models import Detector
+from homework.models import Detector  # make sure Detector is compatible with UNet output
 from homework.metrics import ConfusionMatrix
 
 # -----------------------------
@@ -23,10 +24,10 @@ from homework.metrics import ConfusionMatrix
 batch_size = 16
 lr_seg = 1e-3
 lr_depth = 5e-4
-num_epochs = 25
+num_epochs = 30
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 mixed_precision = True
-num_workers = 2
+num_workers = 4
 
 # -----------------------------
 # Dataset
@@ -39,7 +40,7 @@ train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_w
 val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
 # -----------------------------
-# Class weights
+# Class weights for segmentation
 # -----------------------------
 all_labels = []
 for sample in train_data:
@@ -53,15 +54,15 @@ class_counts = Counter(all_labels.tolist())
 print("Class counts:", class_counts)
 
 # Increase weights for lane/curb (classes 1 & 2)
-weights = torch.tensor([0.1, 2.0, 2.0], device=device)
+weights = torch.tensor([1.0, 2.5, 2.5], device=device)
 seg_criterion = nn.CrossEntropyLoss(weight=weights)
+depth_criterion = nn.L1Loss()
 print("Segmentation weights:", weights)
 
 # -----------------------------
-# Model, Loss, Optimizer
+# Model
 # -----------------------------
 model = Detector(in_channels=3, num_classes=num_classes).to(device)
-depth_criterion = nn.L1Loss()
 
 optimizer = optim.Adam([
     {'params': model.parameters(), 'lr': lr_seg}
@@ -72,7 +73,7 @@ scaler = torch.amp.GradScaler(enabled=(mixed_precision and device.type=="cuda"))
 # -----------------------------
 # Checkpoints
 # -----------------------------
-homework_model_path = homework_path / "detector.th"
+homework_model_path = homework_path / "detector_best.th"
 checkpoint_dir = homework_path / "checkpoints"
 checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -80,7 +81,7 @@ best_val_iou = 0.0
 best_model_wts = None
 
 # -----------------------------
-# Training Loop
+# Training loop
 # -----------------------------
 for epoch in range(num_epochs):
     model.train()
@@ -99,8 +100,9 @@ for epoch in range(num_epochs):
             seg_logits, depth_pred = model(images)
             seg_loss = seg_criterion(seg_logits, seg_labels)
             depth_loss = depth_criterion(depth_pred.squeeze(1), depth_labels)
+
             # Emphasize segmentation
-            loss = seg_loss * 2.0 + depth_loss * 0.5
+            loss = seg_loss * 3.0 + depth_loss * 0.3
 
         scaler.scale(loss).backward()
         scaler.step(optimizer)
