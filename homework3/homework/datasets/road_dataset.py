@@ -1,7 +1,6 @@
 from pathlib import Path
-
 import numpy as np
-from torch.utils.data import ConcatDataset, DataLoader, Dataset
+from torch.utils.data import ConcatDataset, Dataset, DataLoader
 
 from . import road_transforms
 from .road_utils import Track
@@ -12,55 +11,65 @@ class RoadDataset(Dataset):
     SuperTux dataset for road detection
     """
 
-    def __init__(
-        self,
-        episode_path: str,
-        transform_pipeline: str = "default",
-    ):
+    def __init__(self, episode_path: str, transform_pipeline: str = "default"):
         super().__init__()
-
         self.episode_path = Path(episode_path)
 
+        # Load episode info
         info = np.load(self.episode_path / "info.npz", allow_pickle=True)
-
         self.track = Track(**info["track"].item())
-        self.frames: dict[str, np.ndarray] = {k: np.stack(v) for k, v in info["frames"].item().items()}
+
+        # Ensure frames are loaded as arrays
+        frames_dict = info["frames"].item()
+        self.frames: dict[str, np.ndarray] = {k: np.stack(v) for k, v in frames_dict.items()}
+
+        # Setup transform pipeline
         self.transform = self.get_transform(transform_pipeline)
 
     def get_transform(self, transform_pipeline: str):
-        xform = None
-
+        """
+        Returns a composed transform pipeline based on the string identifier.
+        """
         if transform_pipeline == "default":
-            xform = road_transforms.Compose(
-                [
-                    road_transforms.ImageLoader(self.episode_path),
-                    road_transforms.DepthLoader(self.episode_path),
-                    road_transforms.TrackProcessor(self.track),
-                ]
-            )
+            xform = road_transforms.Compose([
+                road_transforms.ImageLoader(self.episode_path),
+                road_transforms.DepthLoader(self.episode_path),
+                road_transforms.TrackProcessor(self.track),
+            ])
         elif transform_pipeline == "aug":
-            pass
-
-        if xform is None:
-            raise ValueError(f"Invalid transform {transform_pipeline} specified!")
+            xform = road_transforms.Compose([
+                road_transforms.ImageLoader(self.episode_path),
+                road_transforms.DepthLoader(self.episode_path),
+                road_transforms.TrackProcessor(self.track),
+                # Consistent augmentations
+                road_transforms.RandomHorizontalFlip(p=0.5),
+                road_transforms.RandomBrightnessContrast(p=0.3),
+                road_transforms.RandomRotate(limit=15, p=0.3),
+            ])
+        else:
+            raise ValueError(f"Invalid transform '{transform_pipeline}' specified!")
 
         return xform
 
     def __len__(self):
         return len(self.frames["location"])
 
-    def __getitem__(self, idx: int):
-        """
-        Returns:
-            dict: sample data with keys "image", "depth", "track"
-        """
-        sample = {"_idx": idx, "_frames": self.frames}
-        sample = self.transform(sample)
+    def __getitem__(self, idx):
+        # Create sample dictionary from frames
+        sample = {k: self.frames[k][idx] for k in self.frames}
 
-        # remove private keys
-        for key in list(sample.keys()):
-            if key.startswith("_"):
-                sample.pop(key)
+        # Provide index and full frames dict for transforms
+        sample['_idx'] = idx
+        sample['_frames'] = self.frames
+
+        # Apply transform pipeline
+        if self.transform:
+            sample = self.transform(sample)
+
+        # Make arrays contiguous to avoid negative stride issues
+        for key in ['image', 'track', 'depth']:
+            if key in sample and isinstance(sample[key], np.ndarray):
+                sample[key] = sample[key].copy()
 
         return sample
 
@@ -74,29 +83,14 @@ def load_data(
     shuffle: bool = False,
 ) -> DataLoader | Dataset:
     """
-    Constructs the dataset/dataloader.
-    The specified transform_pipeline must be implemented in the RoadDataset class.
-
-    Args:
-        transform_pipeline (str): 'default', 'aug', or other custom transformation pipelines
-        return_dataloader (bool): returns either DataLoader or Dataset
-        num_workers (int): data workers, set to 0 for VSCode debugging
-        batch_size (int): batch size
-        shuffle (bool): should be true for train and false for val
-
-    Returns:
-        DataLoader or Dataset
+    Constructs the dataset or dataloader.
     """
     dataset_path = Path(dataset_path)
     scenes = [x for x in dataset_path.iterdir() if x.is_dir()]
-
-    # can pass in a single scene like "road_data/val/cornfield_crossing_04"
     if not scenes and dataset_path.is_dir():
         scenes = [dataset_path]
 
-    datasets = []
-    for episode_path in sorted(scenes):
-        datasets.append(RoadDataset(episode_path, transform_pipeline=transform_pipeline))
+    datasets = [RoadDataset(ep, transform_pipeline=transform_pipeline) for ep in sorted(scenes)]
     dataset = ConcatDataset(datasets)
 
     print(f"Loaded {len(dataset)} samples from {len(datasets)} episodes")

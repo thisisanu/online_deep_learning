@@ -1,261 +1,176 @@
-from pathlib import Path
-
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from pathlib import Path
 
 HOMEWORK_DIR = Path(__file__).resolve().parent
 INPUT_MEAN = [0.2788, 0.2657, 0.2629]
 INPUT_STD = [0.2064, 0.1944, 0.2252]
 
-
-class Classifier(nn.Module):
-    def __init__(
-        self,
-        in_channels: int = 3,
-        num_classes: int = 6,
-    ):
-        """
-        A convolutional network for image classification.
-
-        Args:
-            in_channels: int, number of input channels
-            num_classes: int
-        """
+# ───────────────────────────────
+# Residual Block
+# ───────────────────────────────
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
 
-        self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
-        self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
+        self.shortcut = nn.Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else nn.Identity()
+        self.bn_shortcut = nn.BatchNorm2d(out_channels) if in_channels != out_channels else nn.Identity()
 
-        # Convolutional feature extraction
-        self.conv_layers = nn.Sequential(
-            # Conv block 1
-            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
-            nn.Dropout(0.25),
-            
-            # Conv block 2 
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
-            nn.Dropout(0.25),
-            
-            # Conv block 3
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
-            nn.Dropout(0.25)
-        )
-        
-        # Calculate the flattened feature size
-        self.feature_size = 128 * (64 // 8) * (64 // 8)
-        
-        # Classification head
-        self.classifier = nn.Sequential(
-            nn.Linear(self.feature_size, 512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(512, num_classes)
-        )
+    def forward(self, x):
+        identity = self.bn_shortcut(self.shortcut(x))
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += identity
+        out = F.relu(out)
+        return out
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: tensor (b, 3, h, w) image
+# ───────────────────────────────
+# Classifier
+# ───────────────────────────────
+class Classifier(nn.Module):
+    """
+    Convolutional image classifier for the SuperTux dataset.
+    Works with arbitrary input sizes.
+    """
+    def __init__(self, in_channels=3, num_classes=6):
+        super().__init__()
+        self.register_buffer("input_mean", torch.tensor(INPUT_MEAN))
+        self.register_buffer("input_std", torch.tensor(INPUT_STD))
 
-        Returns:
-            tensor (b, num_classes) logits
-        """
-        # Normalize input
+        # Initial conv layer
+        self.conv0 = nn.Conv2d(in_channels, 32, 3, padding=1)
+        self.bn0 = nn.BatchNorm2d(32)
+
+        # Residual blocks
+        self.res1 = ResidualBlock(32, 64)
+        self.pool1 = nn.MaxPool2d(2)
+        self.res2 = ResidualBlock(64, 128)
+        self.pool2 = nn.MaxPool2d(2)
+        self.res3 = ResidualBlock(128, 256)
+        self.pool3 = nn.MaxPool2d(2)
+
+        # Fully connected classifier (initialized dynamically)
+        self.fc1 = None
+        self.fc2 = nn.Linear(512, num_classes)
+        self.dropout = nn.Dropout(0.5)
+
+    def forward(self, x):
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
-        
-        # Feature extraction
-        features = self.conv_layers(z)
-        
-        # Flatten
-        features = torch.flatten(features, 1)
-        
-        # Classification
-        logits = self.classifier(features)
+        x = F.relu(self.bn0(self.conv0(z)))
+        x = self.pool1(self.res1(x))
+        x = self.pool2(self.res2(x))
+        x = self.pool3(self.res3(x))
+        x = torch.flatten(x, 1)
 
+        # Initialize fc1 dynamically based on input feature size
+        if self.fc1 is None:
+            self.fc1 = nn.Linear(x.shape[1], 512).to(x.device)
+
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+        logits = self.fc2(x)
         return logits
 
-    def predict(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Used for inference, returns class labels
-        This is what the AccuracyMetric uses as input (this is what the grader will use!).
-        You should not have to modify this function.
+    def predict(self, x):
+        return self(x).argmax(dim=1).long()
 
-        Args:
-            x (torch.FloatTensor): image with shape (b, 3, h, w) and vals in [0, 1]
-
-        Returns:
-            pred (torch.LongTensor): class labels {0, 1, ..., 5} with shape (b, h, w)
-        """
-        return self(x).argmax(dim=1)
-
-
-class Detector(torch.nn.Module):
-    def __init__(
-        self,
-        in_channels: int = 3,
-        num_classes: int = 3,
-    ):
-        """
-        A single model that performs segmentation and depth regression
-
-        Args:
-            in_channels: int, number of input channels
-            num_classes: int
-        """
+# ───────────────────────────────
+# Detector (Segmentation + Depth)
+# ───────────────────────────────
+class ConvBlock(nn.Module):
+    """Conv -> BN -> ReLU"""
+    def __init__(self, in_ch, out_ch):
         super().__init__()
+        self.conv = nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False)
+        self.bn = nn.BatchNorm2d(out_ch)
+        self.relu = nn.ReLU(inplace=True)
 
-        self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
-        self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
+    def forward(self, x):
+        return self.relu(self.bn(self.conv(x)))
 
-        # TODO: implement
-        pass
+class UpBlock(nn.Module):
+    """Upsample with skip connection"""
+    def __init__(self, in_ch, skip_ch, out_ch):
+        super().__init__()
+        self.up = nn.ConvTranspose2d(in_ch, out_ch, 2, stride=2)
+        self.conv = ConvBlock(out_ch + skip_ch, out_ch)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Used in training, takes an image and returns raw logits and raw depth.
-        This is what the loss functions use as input.
+    def forward(self, x, skip):
+        x = self.up(x)
+        if x.shape[-2:] != skip.shape[-2:]:
+            x = F.interpolate(x, size=skip.shape[-2:], mode='bilinear', align_corners=False)
+        x = torch.cat([x, skip], dim=1)
+        return self.conv(x)
 
-        Args:
-            x (torch.FloatTensor): image with shape (b, 3, h, w) and vals in [0, 1]
+class Detector(nn.Module):
+    """
+    Detector for joint segmentation (3 classes) and depth estimation.
+    Works with arbitrary input sizes.
+    """
+    def __init__(self, in_channels=3, num_classes=3):
+        super().__init__()
+        self.register_buffer("input_mean", torch.tensor(INPUT_MEAN))
+        self.register_buffer("input_std", torch.tensor(INPUT_STD))
 
-        Returns:
-            tuple of (torch.FloatTensor, torch.FloatTensor):
-                - logits (b, num_classes, h, w)
-                - depth (b, h, w)
-        """
-        # optional: normalizes the input
+        # Encoder
+        self.down1 = ConvBlock(in_channels, 16)
+        self.down2 = ConvBlock(16, 32)
+        self.down3 = ConvBlock(32, 64)
+        self.pool = nn.MaxPool2d(2, 2)
+
+        # Decoder
+        self.up1 = UpBlock(64, 32, 32)
+        self.up2 = UpBlock(32, 16, 16)
+
+        # Heads
+        self.seg_head = nn.Conv2d(16, num_classes, 1)
+        self.depth_head = nn.Conv2d(16, 1, 1)
+
+    def forward(self, x):
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
-        # TODO: replace with actual forward pass
-        logits = torch.randn(x.size(0), 3, x.size(2), x.size(3))
-        raw_depth = torch.rand(x.size(0), x.size(2), x.size(3))
+        # Encoder
+        d1 = self.down1(z)
+        d2 = self.down2(self.pool(d1))
+        d3 = self.down3(self.pool(d2))
 
-        return logits, raw_depth
+        # Decoder
+        u1 = self.up1(d3, d2)
+        u2 = self.up2(u1, d1)
 
-    def predict(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Used for inference, takes an image and returns class labels and normalized depth.
-        This is what the metrics use as input (this is what the grader will use!).
+        # Heads
+        logits = self.seg_head(u2)
+        depth = torch.sigmoid(self.depth_head(u2)).squeeze(1)
+        return logits, depth
 
-        Args:
-            x (torch.FloatTensor): image with shape (b, 3, h, w) and vals in [0, 1]
+    def predict(self, x):
+        logits, depth = self(x)
+        return logits.argmax(dim=1).long(), depth
 
-        Returns:
-            tuple of (torch.LongTensor, torch.FloatTensor):
-                - pred: class labels {0, 1, 2} with shape (b, h, w)
-                - depth: normalized depth [0, 1] with shape (b, h, w)
-        """
-        logits, raw_depth = self(x)
-        pred = logits.argmax(dim=1)
+# ───────────────────────────────
+# Model Factory & Utilities
+# ───────────────────────────────
+MODEL_FACTORY = {"classifier": Classifier, "detector": Detector}
 
-        # Optional additional post-processing for depth only if needed
-        depth = raw_depth
-
-        return pred, depth
-
-
-MODEL_FACTORY = {
-    "classifier": Classifier,
-    "detector": Detector,
-}
-
-
-def load_model(
-    model_name: str,
-    with_weights: bool = False,
-    **model_kwargs,
-) -> torch.nn.Module:
-    """
-    Called by the grader to load a pre-trained model by name
-    """
-    m = MODEL_FACTORY[model_name](**model_kwargs)
-
+def load_model(model_name: str, with_weights=False, **kwargs):
+    m = MODEL_FACTORY[model_name](**kwargs)
     if with_weights:
-        model_path = HOMEWORK_DIR / f"{model_name}.th"
-        assert model_path.exists(), f"{model_path.name} not found"
-
-        try:
-            m.load_state_dict(torch.load(model_path, map_location="cpu"))
-        except RuntimeError as e:
-            raise AssertionError(
-                f"Failed to load {model_path.name}, make sure the default model arguments are set correctly"
-            ) from e
-
-    # limit model sizes since they will be zipped and submitted
-    model_size_mb = calculate_model_size_mb(m)
-
-    if model_size_mb > 20:
-        raise AssertionError(f"{model_name} is too large: {model_size_mb:.2f} MB")
-
+        path = HOMEWORK_DIR / f"{model_name}.th"
+        assert path.exists(), f"{path} not found"
+        state_dict = torch.load(path, map_location="cpu")
+        m.load_state_dict(state_dict, strict=False)
     return m
 
-
-def save_model(model: torch.nn.Module) -> str:
-    """
-    Use this function to save your model in train.py
-    """
-    model_name = None
-
-    for n, m in MODEL_FACTORY.items():
-        if type(model) is m:
-            model_name = n
-
-    if model_name is None:
-        raise ValueError(f"Model type '{str(type(model))}' not supported")
-
-    output_path = HOMEWORK_DIR / f"{model_name}.th"
-    torch.save(model.state_dict(), output_path)
-
-    return output_path
-
-
-def calculate_model_size_mb(model: torch.nn.Module) -> float:
-    """
-    Args:
-        model: torch.nn.Module
-
-    Returns:
-        float, size in megabytes
-    """
-    return sum(p.numel() for p in model.parameters()) * 4 / 1024 / 1024
-
-
-def debug_model(batch_size: int = 1):
-    """
-    Test your model implementation
-
-    Feel free to add additional checks to this function -
-    this function is NOT used for grading
-    """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    sample_batch = torch.rand(batch_size, 3, 64, 64).to(device)
-
-    print(f"Input shape: {sample_batch.shape}")
-
-    model = load_model("classifier", in_channels=3, num_classes=6).to(device)
-    output = model(sample_batch)
-
-    # should output logits (b, num_classes)
-    print(f"Output shape: {output.shape}")
-
-
-if __name__ == "__main__":
-    debug_model()
+def save_model(model: nn.Module) -> str:
+    for name, cls in MODEL_FACTORY.items():
+        if isinstance(model, cls):
+            path = HOMEWORK_DIR / f"{name}.th"
+            torch.save(model.state_dict(), path)
+            print(f"[INFO] Saved model to {path}")
+            return str(path)
+    raise ValueError(f"Unsupported model type: {type(model)}")

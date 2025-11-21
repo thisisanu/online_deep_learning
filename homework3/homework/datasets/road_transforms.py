@@ -263,3 +263,76 @@ class EgoTrackProcessor:
             "waypoints": waypoints.astype(np.float32),
             "waypoints_mask": waypoints_mask,
         }
+        
+# ---- Optional Albumentations transforms (for data augmentation) ----
+try:
+    import albumentations as A
+
+    class RandomBrightnessContrast:
+        """Wrapper for Albumentations RandomBrightnessContrast"""
+        def __init__(self, p=0.3):
+            self.aug = A.RandomBrightnessContrast(p=p)
+
+        def __call__(self, sample: dict):
+            image = sample.get("image")
+            if image is None:
+                return sample
+
+            # Albumentations expects HWC format, float32 or uint8
+            img_hwc = np.transpose(image, (1, 2, 0))
+            augmented = self.aug(image=img_hwc)
+            sample["image"] = np.transpose(augmented["image"], (2, 0, 1))
+            return sample
+
+except ImportError:
+    # fallback if albumentations not installed
+    class RandomBrightnessContrast:
+        def __init__(self, p=0.3):
+            self.p = p
+
+        def __call__(self, sample: dict):
+            # simple brightness jitter fallback
+            if np.random.rand() < self.p:
+                factor = np.random.uniform(0.8, 1.2)
+                sample["image"] = np.clip(sample["image"] * factor, 0, 1)
+            return sample
+
+import numpy as np
+import cv2
+
+class RandomRotate:
+    """
+    Randomly rotate the image and its segmentation map by a small angle.
+    Works for both the RGB image ('image') and the segmentation mask ('track').
+    """
+    def __init__(self, limit=15, p=0.3):
+        self.limit = limit  # max rotation angle in degrees
+        self.p = p
+
+    def __call__(self, sample: dict):
+        if np.random.rand() < self.p:
+            angle = np.random.uniform(-self.limit, self.limit)
+
+            image = sample["image"]
+            track = sample["track"]
+
+            # Image shape: (C, H, W)
+            _, h, w = image.shape
+
+            # Compute rotation matrix
+            center = (w / 2, h / 2)
+            rot_mat = cv2.getRotationMatrix2D(center, angle, 1.0)
+
+            # Rotate image and track (bilinear for image, nearest for mask)
+            rotated_img = np.stack([
+                cv2.warpAffine(image[c], rot_mat, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
+                for c in range(image.shape[0])
+            ])
+            rotated_track = cv2.warpAffine(track, rot_mat, (w, h), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_REFLECT_101)
+
+            sample["image"] = rotated_img
+            sample["track"] = rotated_track
+
+        return sample
+
+

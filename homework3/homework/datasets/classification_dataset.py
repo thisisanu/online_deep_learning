@@ -1,100 +1,120 @@
+import os
 import csv
-from pathlib import Path
-
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
+from torch.utils.data import Dataset, DataLoader
+import torchvision.transforms as T
 
-LABEL_NAMES = ["background", "kart", "pickup", "nitro", "bomb", "projectile"]
-
-
-class SuperTuxDataset(Dataset):
+class SuperTuxClassificationDataset(Dataset):
     """
-    SuperTux dataset for classification
+    SuperTuxKart Classification Dataset.
+    Uses labels.csv for loading image paths and class labels.
+    Auto-generates labels.csv if missing based on folder structure.
     """
+    def __init__(self, root_dir, split='train', transform=None):
+        self.root_dir = os.path.join(root_dir, split)
+        self.transform = transform
+        self.labels_file = os.path.join(self.root_dir, "labels.csv")
 
-    def __init__(
-        self,
-        dataset_path: str,
-        transform_pipeline: str = "default",
-    ):
-        self.transform = self.get_transform(transform_pipeline)
-        self.data = []
+        # Generate labels.csv if it doesn't exist
+        if not os.path.exists(self.labels_file):
+            self._generate_labels_csv()
 
-        with open(Path(dataset_path, "labels.csv"), newline="") as f:
-            for fname, label, _ in csv.reader(f):
-                if label in LABEL_NAMES:
-                    img_path = Path(dataset_path, fname)
-                    label_id = LABEL_NAMES.index(label)
+        # Load samples from labels.csv
+        self.samples, self.class_to_idx = self._load_labels()
 
-                    self.data.append((img_path, label_id))
+    def _load_labels(self):
+        """
+        Loads (image_path, label) tuples from labels.csv
+        Returns:
+            samples: list of tuples (img_path, label_idx)
+            class_to_idx: dict mapping string label -> int
+        """
+        samples = []
+        labels_set = set()
 
-    def get_transform(self, transform_pipeline: str = "default"):
-        xform = None
+        with open(self.labels_file, mode='r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                img_path = os.path.join(self.root_dir, row['file'])  # <-- use 'file' column
+                label_str = row['label']
+                labels_set.add(label_str)
+                samples.append((img_path, label_str))
 
-        if transform_pipeline == "default":
-            xform = transforms.ToTensor()
-        elif transform_pipeline == "aug":
-            # construct your custom augmentation
-            xform = transforms.Compose(
-                [
-                    # TODO: fix
-                    # transforms.ColorJitter(0.9, 0.9, 0.9, 0.1),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor(),
-                ]
-            )
+        # Map string labels to integers
+        class_to_idx = {label: idx for idx, label in enumerate(sorted(labels_set))}
 
-        if xform is None:
-            raise ValueError(f"Invalid transform {transform_pipeline} specified!")
+        # Convert string labels to int labels
+        samples = [(img_path, class_to_idx[label]) for img_path, label in samples]
 
-        return xform
+        return samples, class_to_idx
 
     def __len__(self):
-        return len(self.data)
+        return len(self.samples)
 
     def __getitem__(self, idx):
+        img_path, label = self.samples[idx]
+        img = Image.open(img_path).convert('RGB')
+
+        if self.transform:
+            img = self.transform(img)
+        else:
+            img = T.ToTensor()(img)
+
+        return img, label
+
+    def _generate_labels_csv(self):
         """
-        Pairs of images and labels (int) for classification
+        Automatically generate labels.csv using folder structure
         """
-        img_path, label_id = self.data[idx]
-        img = Image.open(img_path)
-        data = (self.transform(img), label_id)
+        print(f"[INFO] labels.csv not found. Generating in {self.root_dir} ...")
+        class_folders = sorted([f for f in os.listdir(self.root_dir) if os.path.isdir(os.path.join(self.root_dir, f))])
+        self.class_to_idx = {cls_name: idx for idx, cls_name in enumerate(class_folders)}
 
-        return data
+        with open(self.labels_file, mode='w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['file', 'label'])  # <-- column 'file' to match your CSV
+            for cls_name in class_folders:
+                cls_folder = os.path.join(self.root_dir, cls_name)
+                for img_file in os.listdir(cls_folder):
+                    if img_file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                        img_path = os.path.join(cls_name, img_file)  # relative path
+                        writer.writerow([img_path, cls_name])  # store string label
 
-
-def load_data(
-    dataset_path: str,
-    transform_pipeline: str = "default",
-    return_dataloader: bool = True,
-    num_workers: int = 2,
-    batch_size: int = 128,
-    shuffle: bool = False,
-) -> DataLoader | Dataset:
-    """
-    Constructs the dataset/dataloader.
-    The specified transform_pipeline must be implemented in the SuperTuxDataset class.
-
-    Args:
-        transform_pipeline (str): 'default', 'aug', or other custom transformation pipelines
-        return_dataloader (bool): returns either DataLoader or Dataset
-        num_workers (int): data workers, set to 0 for VSCode debugging
-        batch_size (int): batch size
-        shuffle (bool): should be true for train and false for val
-
-    Returns:
-        DataLoader or Dataset
-    """
-    dataset = SuperTuxDataset(dataset_path, transform_pipeline=transform_pipeline)
-
-    if not return_dataloader:
-        return dataset
-
-    return DataLoader(
-        dataset,
-        num_workers=num_workers,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        drop_last=True,
+def get_transform(split="train"):
+    if split == "train":
+        transform = transforms.Compose([
+            transforms.RandomHorizontalFlip(p=0.5),  # Randomly flip images
+            transforms.RandomRotation(15),           # Small rotations
+            transforms.ColorJitter(
+                brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1
+            ),                                        # Random color changes
+            transforms.ToTensor(),
+        ])
+    else:  # validation / test
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+        ])
+    return transform
+    
+def load_data(root_dir, batch_size=32, train=True):
+    """Returns a DataLoader for train/val set"""
+    dataset = SuperTuxClassificationDataset(
+        root_dir=root_dir,
+        split='train' if train else 'val',
+        transform=get_transform(train)
     )
+    return DataLoader(dataset, batch_size=batch_size, shuffle=train, num_workers=2)
+
+def get_class_names(root_dir, split='train'):
+    """
+    Reads labels.csv and returns a sorted list of class names
+    """
+    labels_file = os.path.join(root_dir, split, "labels.csv")
+    print("[get_class_names] Looking for labels.csv at:", labels_file)
+
+    class_names = set()
+    with open(labels_file, mode='r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            class_names.add(row['label'])  # use the 'label' column
+    return sorted(list(class_names))
