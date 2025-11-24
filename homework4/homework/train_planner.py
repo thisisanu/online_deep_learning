@@ -7,27 +7,14 @@ import torch
 from torch.utils.data import DataLoader
 from homework.models import MODEL_FACTORY, save_model
 from homework.datasets.road_dataset import RoadDataset
-from homework.metrics import compute_errors
+from homework.metrics import PlannerMetric
 
-# ------------------------
-# Loss function
-# ------------------------
+
 def waypoint_loss(pred, target, mask):
-    """
-    Computes MSE on valid waypoints only.
-    
-    Args:
-        pred (torch.Tensor): (B, n_waypoints, 2)
-        target (torch.Tensor): (B, n_waypoints, 2)
-        mask (torch.Tensor): (B, n_waypoints) boolean
-    """
-    mask = mask.unsqueeze(-1)  # (B, n_waypoints, 1)
+    mask = mask.unsqueeze(-1)  
     return ((pred - target) ** 2 * mask).mean()
 
 
-# ------------------------
-# Training function
-# ------------------------
 def train(
     model_name="mlp_planner",
     transform_pipeline="state_only",
@@ -37,23 +24,29 @@ def train(
     num_epoch=20,
     device="cpu",
 ):
+
+    # ----------------------------
     # Load datasets
+    # ----------------------------
     train_set = RoadDataset(split="train", transform_pipeline=transform_pipeline)
     val_set = RoadDataset(split="val", transform_pipeline=transform_pipeline)
 
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=num_workers)
 
-    # Create model and optimizer
+    # ----------------------------
+    # Create model + optimizer
+    # ----------------------------
     model = MODEL_FACTORY[model_name]().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
+    # ----------------------------
+    # Training loop
+    # ----------------------------
     for epoch in range(1, num_epoch + 1):
-        # ------------------------
-        # Training loop
-        # ------------------------
         model.train()
         running_loss = 0.0
+
         for batch in train_loader:
             track_left = batch["track_left"].to(device)
             track_right = batch["track_right"].to(device)
@@ -71,11 +64,12 @@ def train(
 
         avg_train_loss = running_loss / len(train_loader.dataset)
 
-        # ------------------------
-        # Validation loop
-        # ------------------------
+        # ----------------------------
+        # Validation using PlannerMetric
+        # ----------------------------
         model.eval()
-        val_long_err, val_lat_err, val_count = 0.0, 0.0, 0
+        metric = PlannerMetric()
+
         with torch.no_grad():
             for batch in val_loader:
                 track_left = batch["track_left"].to(device)
@@ -84,29 +78,23 @@ def train(
                 mask = batch["waypoints_mask"].to(device)
 
                 pred = model(track_left, track_right)
-                long_err, lat_err = compute_errors(pred, waypoints, mask)
-                val_long_err += long_err
-                val_lat_err += lat_err
-                val_count += 1
+                metric.add(pred, waypoints, mask)
 
-        avg_long_err = val_long_err / val_count
-        avg_lat_err = val_lat_err / val_count
+        results = metric.compute()
 
         print(
             f"Epoch [{epoch}/{num_epoch}] "
-            f"Train Loss: {avg_train_loss:.4f} | "
-            f"Val Long: {avg_long_err:.3f}, Lat: {avg_lat_err:.3f}"
+            f"Loss: {avg_train_loss:.4f} | "
+            f"Long: {results['longitudinal_error']:.3f}, "
+            f"Lat: {results['lateral_error']:.3f}"
         )
 
-    # ------------------------
-    # Save the model
-    # ------------------------
+    # ----------------------------
+    # Save trained model
+    # ----------------------------
     save_model(model)
-    print(f"{model_name} saved!")
+    print(f"Saved model → {model_name}.th")
 
 
-# ------------------------
-# Only call train() when running this file directly
-# ------------------------
 if __name__ == "__main__":
     train()
