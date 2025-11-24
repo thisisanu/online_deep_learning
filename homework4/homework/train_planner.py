@@ -5,16 +5,28 @@ Usage:
 
 import torch
 from torch.utils.data import DataLoader
+
 from homework.models import MODEL_FACTORY, save_model
-from homework.datasets.road_dataset import RoadDataset
+from homework.datasets.road_dataset import load_data
 from homework.metrics import PlannerMetric
 
 
+# ------------------------
+# Loss function
+# ------------------------
 def waypoint_loss(pred, target, mask):
-    mask = mask.unsqueeze(-1)  
+    """
+    Computes MSE on valid waypoints only.
+    pred, target: (B, n_waypoints, 2)
+    mask: (B, n_waypoints) boolean
+    """
+    mask = mask.unsqueeze(-1)  # (B, n_waypoints, 1)
     return ((pred - target) ** 2 * mask).mean()
 
 
+# ------------------------
+# Training function
+# ------------------------
 def train(
     model_name="mlp_planner",
     transform_pipeline="state_only",
@@ -26,22 +38,34 @@ def train(
 ):
 
     # ----------------------------
-    # Load datasets
+    # Load datasets CORRECTLY
     # ----------------------------
-    train_set = RoadDataset(split="train", transform_pipeline=transform_pipeline)
-    val_set = RoadDataset(split="val", transform_pipeline=transform_pipeline)
+    train_loader = load_data(
+        dataset_path="road_data/train",
+        transform_pipeline=transform_pipeline,
+        return_dataloader=True,
+        num_workers=num_workers,
+        batch_size=batch_size,
+        shuffle=True,
+    )
 
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=num_workers)
+    val_loader = load_data(
+        dataset_path="road_data/val",
+        transform_pipeline=transform_pipeline,
+        return_dataloader=True,
+        num_workers=num_workers,
+        batch_size=batch_size,
+        shuffle=False,
+    )
 
     # ----------------------------
-    # Create model + optimizer
+    # Create model
     # ----------------------------
     model = MODEL_FACTORY[model_name]().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # ----------------------------
-    # Training loop
+    # Training Loop
     # ----------------------------
     for epoch in range(1, num_epoch + 1):
         model.train()
@@ -65,7 +89,7 @@ def train(
         avg_train_loss = running_loss / len(train_loader.dataset)
 
         # ----------------------------
-        # Validation using PlannerMetric
+        # Validation
         # ----------------------------
         model.eval()
         metric = PlannerMetric()
@@ -84,7 +108,7 @@ def train(
 
         print(
             f"Epoch [{epoch}/{num_epoch}] "
-            f"Loss: {avg_train_loss:.4f} | "
+            f"Train Loss: {avg_train_loss:.4f} | "
             f"Long: {results['longitudinal_error']:.3f}, "
             f"Lat: {results['lateral_error']:.3f}"
         )
@@ -96,5 +120,8 @@ def train(
     print(f"Saved model → {model_name}.th")
 
 
+# ----------------------------
+# Run if file executed directly
+# ----------------------------
 if __name__ == "__main__":
     train()
