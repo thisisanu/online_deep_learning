@@ -7,15 +7,21 @@ HOMEWORK_DIR = Path(__file__).resolve().parent
 INPUT_MEAN = [0.2788, 0.2657, 0.2629]
 INPUT_STD = [0.2064, 0.1944, 0.2252]
 
-
 class MLPPlanner(nn.Module):
-    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 512):
+    def __init__(
+        self,
+        n_track: int = 10,
+        n_waypoints: int = 3,
+    ):
         super().__init__()
+
         self.n_track = n_track
         self.n_waypoints = n_waypoints
 
-        input_dim = n_track * 2 * 2  # left + right
+        input_dim = n_track * 2 * 2  # 40
         output_dim = n_waypoints * 2
+
+        hidden_dim = 320  # improved but still safe (<20MB)
 
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -27,18 +33,20 @@ class MLPPlanner(nn.Module):
             nn.Linear(hidden_dim, output_dim)
         )
 
-    def forward(self, track_left: torch.Tensor, track_right: torch.Tensor):
-        B = track_left.shape[0]
+    def forward(self, track_left, track_right, **kwargs):
+        B = track_left.size(0)
 
-        # Center the tracks (helps lateral accuracy)
-        center = (track_left + track_right) / 2
-        track_left = track_left - center
-        track_right = track_right - center
+        # -----------------------
+        # Normalize coordinates
+        # -----------------------
+        x = torch.cat([track_left, track_right], dim=1)  # (B, 20, 2)
+        mean = x.mean(dim=1, keepdim=True)
+        std = x.std(dim=1, keepdim=True) + 1e-6
+        x = (x - mean) / std  
+        x = x.reshape(B, -1)  # flatten
 
-        x = torch.cat([track_left.reshape(B, -1), track_right.reshape(B, -1)], dim=1)
         out = self.net(x)
-        return out.view(B, self.n_waypoints, 2)
-
+        return out.reshape(B, self.n_waypoints, 2)
 
 
 class TransformerPlanner(nn.Module):
