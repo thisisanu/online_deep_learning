@@ -5,7 +5,6 @@ Usage:
 
 import torch
 from torch.utils.data import DataLoader
-
 from homework.models import MODEL_FACTORY, save_model
 from homework.datasets.road_dataset import load_data
 from homework.metrics import PlannerMetric
@@ -36,9 +35,8 @@ def train(
     num_epoch=20,
     device="cpu",
 ):
-
     # ----------------------------
-    # Load datasets CORRECTLY
+    # Load datasets
     # ----------------------------
     train_loader = load_data(
         dataset_path="drive_data/train",
@@ -59,13 +57,13 @@ def train(
     )
 
     # ----------------------------
-    # Create model
+    # Create model and optimizer
     # ----------------------------
     model = MODEL_FACTORY[model_name]().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # ----------------------------
-    # Training Loop
+    # Training loop
     # ----------------------------
     for epoch in range(1, num_epoch + 1):
         model.train()
