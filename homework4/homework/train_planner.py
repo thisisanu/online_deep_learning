@@ -41,7 +41,7 @@ def train(
     # Load datasets CORRECTLY
     # ----------------------------
     train_loader = load_data(
-        dataset_path="road_data/train",
+        dataset_path="drive_data/train",
         transform_pipeline=transform_pipeline,
         return_dataloader=True,
         num_workers=num_workers,
@@ -50,7 +50,7 @@ def train(
     )
 
     val_loader = load_data(
-        dataset_path="road_data/val",
+        dataset_path="drive_data/val",
         transform_pipeline=transform_pipeline,
         return_dataloader=True,
         num_workers=num_workers,
