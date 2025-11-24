@@ -92,9 +92,6 @@ def train(num_epochs=20, batch_size=64, lr=1e-3, device="cpu"):
     print("Model saved!")
 
 
-# ------------------------
-# Entry point
-# ------------------------
+# Only call train when running this file directly
 if __name__ == "__main__":
-    print("Time to train!")
     train()
