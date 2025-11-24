@@ -7,6 +7,9 @@ from torch.utils.data import DataLoader
 from homework.models import MLPPlanner, save_model
 from homework.datasets.road_dataset import RoadDataset
 from homework.metrics import compute_errors  # or compute_metrics depending on your repo
+from homework.models import MODEL_FACTORY, save_model
+from homework.datasets.road_dataset import RoadDataset
+from homework.metrics import compute_errors
 
 # ------------------------
 # Loss function
@@ -33,11 +36,6 @@ def train(
     num_epoch=20,
     device="cpu",
 ):
-    from torch.utils.data import DataLoader
-    from homework.models import MODEL_FACTORY, save_model
-    from homework.datasets.road_dataset import RoadDataset
-    from homework.metrics import compute_errors
-
     # Load datasets with optional transform pipeline
     train_set = RoadDataset(split="train", transform_pipeline=transform_pipeline)
     val_set = RoadDataset(split="val", transform_pipeline=transform_pipeline)
