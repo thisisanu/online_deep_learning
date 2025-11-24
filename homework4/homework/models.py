@@ -9,26 +9,13 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
 class MLPPlanner(nn.Module):
-    def __init__(
-        self,
-        n_track: int = 10,
-        n_waypoints: int = 3,
-    ):
-        """
-        Args:
-            n_track (int): number of points in each side of the track
-            n_waypoints (int): number of waypoints to predict
-        """
+    def __init__(self, n_track: int = 10, n_waypoints: int = 3, hidden_dim: int = 512):
         super().__init__()
-
         self.n_track = n_track
         self.n_waypoints = n_waypoints
-        
-        # input size = left(10,2) + right(10,2) = 40
-        input_dim = n_track * 2 * 2
-        output_dim = n_waypoints * 2
 
-        hidden_dim = 256  # performs well and stays far below 20 MB
+        input_dim = n_track * 2 * 2  # left + right
+        output_dim = n_waypoints * 2
 
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -37,37 +24,21 @@ class MLPPlanner(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, output_dim))
+            nn.Linear(hidden_dim, output_dim)
+        )
 
-    def forward(
-        self,
-        track_left: torch.Tensor,
-        track_right: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
-        """
-        Predicts waypoints from the left and right boundaries of the track.
-
-        During test time, your model will be called with
-        model(track_left=..., track_right=...), so keep the function signature as is.
-
-        Args:
-            track_left (torch.Tensor): shape (b, n_track, 2)
-            track_right (torch.Tensor): shape (b, n_track, 2)
-
-        Returns:
-            torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
-        """
+    def forward(self, track_left: torch.Tensor, track_right: torch.Tensor):
         B = track_left.shape[0]
 
-        # Flatten and concatenate input tracks
-        x = torch.cat(
-            [track_left.reshape(B, -1), track_right.reshape(B, -1)],
-            dim=1,
-        )  # shape (B, 40)
+        # Center the tracks (helps lateral accuracy)
+        center = (track_left + track_right) / 2
+        track_left = track_left - center
+        track_right = track_right - center
 
-        out = self.net(x)  # shape (B, 6)
-        return out.reshape(B, self.n_waypoints, 2)
+        x = torch.cat([track_left.reshape(B, -1), track_right.reshape(B, -1)], dim=1)
+        out = self.net(x)
+        return out.view(B, self.n_waypoints, 2)
+
 
 
 class TransformerPlanner(nn.Module):
