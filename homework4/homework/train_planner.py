@@ -14,13 +14,12 @@ from homework.metrics import PlannerMetric
 # Loss function
 # ------------------------
 def waypoint_loss(pred, target, mask):
-    """
-    Computes MSE on valid waypoints only.
-    pred, target: (B, n_waypoints, 2)
-    mask: (B, n_waypoints) boolean
-    """
-    mask = mask.unsqueeze(-1)  # (B, n_waypoints, 1)
-    return ((pred - target) ** 2 * mask).mean()
+    mask = mask.unsqueeze(-1)
+
+    dx = pred[..., 0] - target[..., 0]
+    dy = pred[..., 1] - target[..., 1]
+
+    return (1.3 * dx**2 + dy**2).mul(mask).mean()
 
 
 # ------------------------
