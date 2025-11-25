@@ -7,6 +7,7 @@ HOMEWORK_DIR = Path(__file__).resolve().parent
 INPUT_MEAN = [0.2788, 0.2657, 0.2629]
 INPUT_STD = [0.2064, 0.1944, 0.2252]
 
+
 class MLPPlanner(nn.Module):
     def __init__(self, n_track=10, n_waypoints=3):
         super().__init__()
@@ -14,10 +15,10 @@ class MLPPlanner(nn.Module):
         self.n_track = n_track
         self.n_waypoints = n_waypoints
 
-        input_dim = n_track * 2 * 2  # 40
+        input_dim = n_track * 2 * 2  # (left/right) * (x/y)
         output_dim = n_waypoints * 2
 
-        hidden_dim = 320  # improved but still safe (<20MB)
+        hidden_dim = 320
 
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -26,23 +27,27 @@ class MLPPlanner(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, output_dim)
+            nn.Linear(hidden_dim, output_dim),
         )
 
     def forward(self, track_left, track_right, **kwargs):
         B = track_left.size(0)
 
-        # -----------------------
-        # Normalize coordinates
-        # -----------------------
-        x = torch.cat([track_left, track_right], dim=1)  # (B, 20, 2)
+        # Concatenate → (B, 20, 2)
+        x = torch.cat([track_left, track_right], dim=1)
+
+        # Normalize per-sample
         mean = x.mean(dim=1, keepdim=True)
-        std = x.std(dim=1, keepdim=True) + 1e-6
-        x = (x - mean) / std  
-        x = x.reshape(B, -1)  # flatten
+        std = x.std(dim=1, keepdim=True, unbiased=False).clamp(min=1e-6)
+        x = (x - mean) / std
+
+        # Flatten → (B, 40)
+        x = x.view(B, -1)
 
         out = self.net(x)
-        return out.reshape(B, self.n_waypoints, 2)
+
+        # Output → (B, n_waypoints, 2)
+        return out.view(B, self.n_waypoints, 2)
 
 
 class TransformerPlanner(nn.Module):
@@ -65,28 +70,11 @@ class TransformerPlanner(nn.Module):
         track_right: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        """
-        Predicts waypoints from the left and right boundaries of the track.
-
-        During test time, your model will be called with
-        model(track_left=..., track_right=...), so keep the function signature as is.
-
-        Args:
-            track_left (torch.Tensor): shape (b, n_track, 2)
-            track_right (torch.Tensor): shape (b, n_track, 2)
-
-
-        Returns:
-            torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
-        """
         raise NotImplementedError
 
 
-class CNNPlanner(torch.nn.Module):
-    def __init__(
-        self,
-        n_waypoints: int = 3,
-    ):
+class CNNPlanner(nn.Module):
+    def __init__(self, n_waypoints: int = 3):
         super().__init__()
 
         self.n_waypoints = n_waypoints
@@ -95,16 +83,8 @@ class CNNPlanner(torch.nn.Module):
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD), persistent=False)
 
     def forward(self, image: torch.Tensor, **kwargs) -> torch.Tensor:
-        """
-        Args:
-            image (torch.FloatTensor): shape (b, 3, h, w) and vals in [0, 1]
-
-        Returns:
-            torch.FloatTensor: future waypoints with shape (b, n, 2)
-        """
         x = image
         x = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
-
         raise NotImplementedError
 
 
@@ -120,9 +100,6 @@ def load_model(
     with_weights: bool = False,
     **model_kwargs,
 ) -> torch.nn.Module:
-    """
-    Called by the grader to load a pre-trained model by name
-    """
     m = MODEL_FACTORY[model_name](**model_kwargs)
 
     if with_weights:
@@ -136,7 +113,6 @@ def load_model(
                 f"Failed to load {model_path.name}, make sure the default model arguments are set correctly"
             ) from e
 
-    # limit model sizes since they will be zipped and submitted
     model_size_mb = calculate_model_size_mb(m)
 
     if model_size_mb > 20:
@@ -145,27 +121,5 @@ def load_model(
     return m
 
 
-def save_model(model: torch.nn.Module) -> str:
-    """
-    Use this function to save your model in train.py
-    """
+def save_model(model: nn.Module) -> str:
     model_name = None
-
-    for n, m in MODEL_FACTORY.items():
-        if type(model) is m:
-            model_name = n
-
-    if model_name is None:
-        raise ValueError(f"Model type '{str(type(model))}' not supported")
-
-    output_path = HOMEWORK_DIR / f"{model_name}.th"
-    torch.save(model.state_dict(), output_path)
-
-    return output_path
-
-
-def calculate_model_size_mb(model: torch.nn.Module) -> float:
-    """
-    Naive way to estimate model size
-    """
-    return sum(p.numel() for p in model.parameters()) * 4 / 1024 / 1024
