@@ -87,6 +87,9 @@ def train(
             mask      = batch["waypoints_mask"][:, :3].to(device) # (B,3)
 
             pred = model(track_left, track_right)
+            # SAFETY: ensure pred has same number of waypoints as target
+            if pred.size(1) != waypoints.size(1):
+                pred = pred[:, :waypoints.size(1), :]
 
             # Compute loss
             loss = waypoint_loss(pred, waypoints, mask)
