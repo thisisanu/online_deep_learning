@@ -56,21 +56,92 @@ class TransformerPlanner(nn.Module):
         n_track: int = 10,
         n_waypoints: int = 3,
         d_model: int = 64,
+        nhead: int = 4,
+        num_layers: int = 2,
     ):
         super().__init__()
 
         self.n_track = n_track
         self.n_waypoints = n_waypoints
+        self.d_model = d_model
 
+        # ------------------------------------------------------------------
+        # Encode track boundary points (x,y) into d_model
+        # Input tokens: 20 track points (10 left + 10 right)
+        # ------------------------------------------------------------------
+        self.input_proj = nn.Linear(2, d_model)
+
+        # Positional embedding for 20 tokens
+        self.pos_embed = nn.Parameter(torch.zeros(1, n_track * 2, d_model))
+
+        # ------------------------------------------------------------------
+        # Transformer encoder to understand road geometry
+        # ------------------------------------------------------------------
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=d_model * 4,
+            batch_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        # ------------------------------------------------------------------
+        # Learnable queries (one per future waypoint)
+        # ------------------------------------------------------------------
         self.query_embed = nn.Embedding(n_waypoints, d_model)
 
-    def forward(
-        self,
-        track_left: torch.Tensor,
-        track_right: torch.Tensor,
-        **kwargs,
-    ) -> torch.Tensor:
-        raise NotImplementedError
+        # Cross-attention for decoding
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=d_model * 4,
+            batch_first=True,
+        )
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=1)
+
+        # Final head → (x, y)
+        self.out = nn.Linear(d_model, 2)
+
+    def forward(self, track_left, track_right, **kwargs):
+        """
+        Args:
+            track_left  : (B, n_track, 2)
+            track_right : (B, n_track, 2)
+
+        Returns:
+            (B, n_waypoints, 2)
+        """
+        B = track_left.size(0)
+
+        # ---------------------------------------------------------------
+        # 1) Prepare encoder input tokens
+        # ---------------------------------------------------------------
+        x = torch.cat([track_left, track_right], dim=1)      # (B, 20, 2)
+        x = self.input_proj(x)                               # (B, 20, d_model)
+        x = x + self.pos_embed                               # add positional encodings
+
+        # ---------------------------------------------------------------
+        # 2) Encode road geometry
+        # ---------------------------------------------------------------
+        memory = self.encoder(x)                             # (B, 20, d_model)
+
+        # ---------------------------------------------------------------
+        # 3) Prepare queries for waypoints
+        # ---------------------------------------------------------------
+        queries = self.query_embed.weight.unsqueeze(0).repeat(B, 1, 1)  # (B, n_waypoints, d_model)
+
+        # ---------------------------------------------------------------
+        # 4) Cross-attention: queries attend to encoded track
+        # ---------------------------------------------------------------
+        decoded = self.decoder(queries, memory)              # (B, n_waypoints, d_model)
+
+        # ---------------------------------------------------------------
+        # 5) Predict (x, y)
+        # ---------------------------------------------------------------
+        out = self.out(decoded)                              # (B, n_waypoints, 2)
+
+        return out
+
 
 
 class CNNPlanner(nn.Module):
