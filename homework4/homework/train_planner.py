@@ -31,12 +31,12 @@ def waypoint_loss(pred, target, mask):
 
 
 # ------------------------------------------------------
-# FINAL TRAIN FUNCTION — PASSING VERSION
+# FINAL TRAIN FUNCTION — WORKING VERSION
 # ------------------------------------------------------
 def train(
     model_name="mlp_planner",
     transform_pipeline="state_only",
-    num_workers=2,              # prevents warnings/freezing
+    num_workers=2,
     lr=1e-3,
     batch_size=64,
     num_epoch=40,
@@ -44,7 +44,7 @@ def train(
 ):
 
     # --------------------------------------------------
-    # Correct dataset paths
+    # Dataloaders
     # --------------------------------------------------
     train_loader = load_data(
         dataset_path="drive_data/train",
@@ -78,17 +78,18 @@ def train(
         total_loss = 0.0
 
         for batch in train_loader:
-            track_left = batch["track_left"].to(device)
+            track_left  = batch["track_left"].to(device)
             track_right = batch["track_right"].to(device)
-            waypoints = batch["waypoints"].to(device)
-            mask = batch["waypoints_mask"].to(device)
+
+            # ------------------------------
+            # FIX: reduce GT from 128 → 3
+            # ------------------------------
+            waypoints = batch["waypoints"][:, :3].to(device)          # (B,3,2)
+            mask      = batch["waypoints_mask"][:, :3].to(device)     # (B,3)
 
             pred = model(track_left, track_right)
 
-            # Debug shape check — safe to keep
-            assert pred.shape == waypoints.shape, \
-                f"Shape mismatch: pred {pred.shape}, target {waypoints.shape}"
-
+            # Shapes now match
             loss = waypoint_loss(pred, waypoints, mask)
 
             optimizer.zero_grad()
@@ -111,9 +112,13 @@ def train(
                     batch["track_left"].to(device),
                     batch["track_right"].to(device)
                 )
-                metric.add(pred,
-                           batch["waypoints"].to(device),
-                           batch["waypoints_mask"].to(device))
+
+                # same reduction on validation set
+                metric.add(
+                    pred,
+                    batch["waypoints"][:, :3].to(device),
+                    batch["waypoints_mask"][:, :3].to(device),
+                )
 
         results = metric.compute()
 
@@ -121,7 +126,7 @@ def train(
             f"Epoch [{epoch}/{num_epoch}] "
             f"Train Loss: {avg_loss:.4f} | "
             f"Long: {results['longitudinal_error']:.3f} | "
-            f"Lat: {results['lateral_error']:.3f}"
+            f"Lat:  {results['lateral_error']:.3f}"
         )
 
     # --------------------------------------------------
