@@ -8,11 +8,7 @@ INPUT_MEAN = [0.2788, 0.2657, 0.2629]
 INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 class MLPPlanner(nn.Module):
-    def __init__(
-        self,
-        n_track: int = 10,
-        n_waypoints: int = 3,
-    ):
+    def __init__(self, n_track=10, n_waypoints=128):
         super().__init__()
 
         self.n_track = n_track
