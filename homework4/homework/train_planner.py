@@ -11,7 +11,7 @@ from homework.metrics import PlannerMetric
 
 
 # ------------------------------------------------------
-# Correct waypoint loss (weighted Long/Lat + mask)
+# Waypoint loss (weighted Long/Lat + mask)
 # ------------------------------------------------------
 def waypoint_loss(pred, target, mask):
     """
@@ -24,14 +24,13 @@ def waypoint_loss(pred, target, mask):
     dx = pred[..., 0] - target[..., 0]
     dy = pred[..., 1] - target[..., 1]
 
-    # Weighted longitudinal & lateral loss
     loss = (1.3 * dx**2 + dy**2) * mask
 
     return loss.mean()
 
 
 # ------------------------------------------------------
-# FINAL TRAIN FUNCTION — WORKING VERSION
+# Training function
 # ------------------------------------------------------
 def train(
     model_name="mlp_planner",
@@ -44,7 +43,7 @@ def train(
 ):
 
     # --------------------------------------------------
-    # Dataloaders
+    # Data loaders
     # --------------------------------------------------
     train_loader = load_data(
         dataset_path="drive_data/train",
@@ -65,9 +64,9 @@ def train(
     )
 
     # --------------------------------------------------
-    # Model
+    # Model: FORCE n_waypoints=3 (fix!!)
     # --------------------------------------------------
-    model = MODEL_FACTORY[model_name]().to(device)
+    model = MODEL_FACTORY[model_name](n_waypoints=3).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # --------------------------------------------------
@@ -84,12 +83,12 @@ def train(
             # ------------------------------
             # FIX: reduce GT from 128 → 3
             # ------------------------------
-            waypoints = batch["waypoints"][:, :3].to(device)          # (B,3,2)
-            mask      = batch["waypoints_mask"][:, :3].to(device)     # (B,3)
+            waypoints = batch["waypoints"][:, :3].to(device)      # (B,3,2)
+            mask      = batch["waypoints_mask"][:, :3].to(device) # (B,3)
 
             pred = model(track_left, track_right)
 
-            # Shapes now match
+            # Compute loss
             loss = waypoint_loss(pred, waypoints, mask)
 
             optimizer.zero_grad()
@@ -110,14 +109,13 @@ def train(
             for batch in val_loader:
                 pred = model(
                     batch["track_left"].to(device),
-                    batch["track_right"].to(device)
+                    batch["track_right"].to(device),
                 )
 
-                # same reduction on validation set
                 metric.add(
                     pred,
                     batch["waypoints"][:, :3].to(device),
-                    batch["waypoints_mask"][:, :3].to(device),
+                    batch["waypoints_mask"][:, :3].to(device)
                 )
 
         results = metric.compute()
