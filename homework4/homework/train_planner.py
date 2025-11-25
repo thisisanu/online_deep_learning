@@ -35,6 +35,10 @@ def waypoint_loss(pred, target, mask):
     # Weighted loss
     loss = (1.3 * dx2 + dy2) * mask  # shape (B, n_waypoints, 1)
 
+    print("pred.shape:", pred.shape)
+    print("target.shape:", target.shape)
+    print("mask.shape:", mask.shape)
+
     # Mean over all elements
     return loss.mean()
 
