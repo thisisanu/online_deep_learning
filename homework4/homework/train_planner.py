@@ -96,6 +96,9 @@ def train(
             # SAFETY: ensure pred has same number of waypoints as target
             if pred.size(1) != waypoints.size(1):
                 pred = pred[:, :waypoints.size(1), :]
+                
+            print("pred.shape:", pred.shape, "target.shape:", waypoints.shape)
+
 
             # Compute loss
             loss = waypoint_loss(pred, waypoints, mask)
