@@ -28,18 +28,13 @@ def waypoint_loss(pred, target, mask):
     if mask.dim() == 2:
         mask = mask.unsqueeze(-1)  # (B, n_waypoints, 1)
 
-    # Compute squared errors
+    # Compute squared differences
     dx2 = (pred[..., 0] - target[..., 0]) ** 2
     dy2 = (pred[..., 1] - target[..., 1]) ** 2
 
     # Weighted loss
-    loss = (1.3 * dx2 + dy2) * mask  # shape (B, n_waypoints, 1)
+    loss = (1.3 * dx2 + dy2) * mask  # shape (B, n_waypoints, 2) → multiplied safely
 
-    print("pred.shape:", pred.shape)
-    print("target.shape:", target.shape)
-    print("mask.shape:", mask.shape)
-
-    # Mean over all elements
     return loss.mean()
 
 
@@ -78,7 +73,7 @@ def train(
     )
 
     # --------------------------------------------------
-    # Model: FORCE n_waypoints=3 (fix!!)
+    # Model: FORCE n_waypoints=3
     # --------------------------------------------------
     model = MODEL_FACTORY[model_name](n_waypoints=3).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -91,22 +86,16 @@ def train(
         total_loss = 0.0
 
         for batch in train_loader:
-            track_left  = batch["track_left"].to(device)
+            track_left = batch["track_left"].to(device)
             track_right = batch["track_right"].to(device)
 
-            # ------------------------------
-            # FIX: reduce GT from 128 → 3
-            # ------------------------------
             waypoints = batch["waypoints"][:, :3].to(device)      # (B,3,2)
-            mask      = batch["waypoints_mask"][:, :3].to(device) # (B,3)
+            mask = batch["waypoints_mask"][:, :3].to(device)      # (B,3)
 
             pred = model(track_left, track_right)
-            # SAFETY: ensure pred has same number of waypoints as target
+            # SAFETY: ensure pred matches target
             if pred.size(1) != waypoints.size(1):
                 pred = pred[:, :waypoints.size(1), :]
-                
-            print("pred.shape:", pred.shape, "target.shape:", waypoints.shape)
-
 
             # Compute loss
             loss = waypoint_loss(pred, waypoints, mask)
