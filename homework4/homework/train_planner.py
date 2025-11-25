@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from homework.models import MODEL_FACTORY, save_model
 from homework.datasets.road_dataset import load_data
 from homework.metrics import PlannerMetric
-
+import pathlib
 
 # ------------------------------------------------------
 # Waypoint loss (weighted Long/Lat + mask)
@@ -28,13 +28,11 @@ def waypoint_loss(pred, target, mask):
     if mask.dim() == 2:
         mask = mask.unsqueeze(-1)  # (B, n_waypoints, 1)
 
-    # Compute squared differences
     dx2 = (pred[..., 0] - target[..., 0]) ** 2
     dy2 = (pred[..., 1] - target[..., 1]) ** 2
 
     # Weighted loss
-    loss = (1.3 * dx2 + dy2) * mask  # shape (B, n_waypoints, 2) → multiplied safely
-
+    loss = (1.3 * dx2 + dy2) * mask
     return loss.mean()
 
 
@@ -50,6 +48,14 @@ def train(
     num_epoch=40,
     device="cuda" if torch.cuda.is_available() else "cpu",
 ):
+
+    # --------------------------------------------------
+    # Delete old checkpoint if exists
+    # --------------------------------------------------
+    checkpoint_path = pathlib.Path(f"{model_name}.th")
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
+        print(f"Deleted old checkpoint: {checkpoint_path}")
 
     # --------------------------------------------------
     # Data loaders
@@ -121,9 +127,14 @@ def train(
                     batch["track_right"].to(device),
                 )
 
+                # SAFETY: slice pred
+                target_waypoints = batch["waypoints"][:, :3].to(device)
+                if pred.size(1) != target_waypoints.size(1):
+                    pred = pred[:, :target_waypoints.size(1), :]
+
                 metric.add(
                     pred,
-                    batch["waypoints"][:, :3].to(device),
+                    target_waypoints,
                     batch["waypoints_mask"][:, :3].to(device)
                 )
 
