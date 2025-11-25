@@ -15,16 +15,14 @@ from homework.metrics import PlannerMetric
 # ------------------------------------------------------
 def waypoint_loss(pred, target, mask):
     """
-    pred:   (B, n_pred, 2)      <- can be longer than target
+    pred:   (B, n_pred, 2)      
     target: (B, n_waypoints, 2)
     mask:   (B, n_waypoints)
     """
-
-    # SAFETY: match pred to target waypoints
+    # Safety: match predicted waypoints to target
     if pred.size(1) != target.size(1):
         pred = pred[:, :target.size(1), :]
 
-    # Expand mask for broadcasting
     mask = mask.unsqueeze(-1)  # (B, n_waypoints, 1)
 
     dx = pred[..., 0] - target[..., 0]
@@ -33,6 +31,7 @@ def waypoint_loss(pred, target, mask):
     loss = (1.3 * dx**2 + dy**2) * mask
 
     return loss.mean()
+
 
 
 
