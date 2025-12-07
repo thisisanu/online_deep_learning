@@ -3,6 +3,11 @@ Usage:
     python3 -m homework.train_planner --your_args here
 """
 
+"""
+Usage:
+    python3 -m homework.train_planner --your_args here
+"""
+
 import torch
 from torch.utils.data import DataLoader
 from homework.models import MODEL_FACTORY, save_model
@@ -14,29 +19,30 @@ import pathlib
 # Waypoint loss (weighted Long/Lat + mask)
 # ------------------------------------------------------
 def waypoint_loss(pred, target, mask):
-    # pred:   (B, n, 2)
-    # target: (B, n, 2)
-    # mask:   (B, n) or (B, n, 1)
-
-    # Trim pred if necessary
+    """
+    pred:   (B, n_waypoints, 2)
+    target: (B, n_waypoints, 2)
+    mask:   (B, n_waypoints)
+    """
+    # SAFETY: trim pred to match target
     if pred.size(1) != target.size(1):
         pred = pred[:, :target.size(1), :]
 
-    # Compute squared errors
-    dx2 = (pred[..., 0] - target[..., 0]) ** 2   # (B, n)
-    dy2 = (pred[..., 1] - target[..., 1]) ** 2   # (B, n)
+    # Ensure mask is broadcastable
+    if mask.dim() == 2:
+        mask = mask.unsqueeze(-1)  # (B, n_waypoints, 1)
 
-    loss = 1.3 * dx2 + dy2                       # (B, n)
+    dx2 = (pred[..., 0] - target[..., 0]) ** 2
+    dy2 = (pred[..., 1] - target[..., 1]) ** 2
 
-    # ---- FIX: squeeze mask to match loss ndim ----
-    if mask.dim() == 3 and mask.size(-1) == 1:
-        mask = mask.squeeze(-1)                  # (B, n)
+    loss = 1.3 * dx2 + dy2
 
-    # Mask already matches (B, n)
-    loss = loss * mask
+    # flatten any trailing singleton dimension in mask
+    if mask.ndim == loss.ndim and mask.shape[-1] == 1:
+        mask = mask.squeeze(-1)
 
-    return loss.mean()
-
+    mask = mask.expand_as(loss)
+    return (loss * mask).mean()
 
 # ------------------------------------------------------
 # Training function
@@ -94,13 +100,15 @@ def train(
         total_loss = 0.0
 
         for batch in train_loader:
-            track_left = batch["track_left"].to(device)
-            track_right = batch["track_right"].to(device)
-
+            # ------------------------------
+            # STATE_ONLY pipeline
+            # ------------------------------
+            state = batch["state"][:, :].to(device)
             waypoints = batch["waypoints"][:, :3].to(device)      # (B,3,2)
             mask = batch["waypoints_mask"][:, :3].to(device)      # (B,3)
 
-            pred = model(track_left, track_right)
+            pred = model(state)
+
             # SAFETY: ensure pred matches target
             if pred.size(1) != waypoints.size(1):
                 pred = pred[:, :waypoints.size(1), :]
@@ -112,7 +120,7 @@ def train(
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item() * track_left.size(0)
+            total_loss += loss.item() * state.size(0)
 
         avg_loss = total_loss / len(train_loader.dataset)
 
@@ -124,12 +132,9 @@ def train(
 
         with torch.no_grad():
             for batch in val_loader:
-                pred = model(
-                    batch["track_left"].to(device),
-                    batch["track_right"].to(device),
-                )
+                state = batch["state"][:, :].to(device)
+                pred = model(state)
 
-                # SAFETY: slice pred
                 target_waypoints = batch["waypoints"][:, :3].to(device)
                 if pred.size(1) != target_waypoints.size(1):
                     pred = pred[:, :target_waypoints.size(1), :]
