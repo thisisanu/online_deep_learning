@@ -14,32 +14,29 @@ import pathlib
 # Waypoint loss (weighted Long/Lat + mask)
 # ------------------------------------------------------
 def waypoint_loss(pred, target, mask):
-    """
-    pred:   (B, n_waypoints, 2)
-    target: (B, n_waypoints, 2)
-    mask:   (B, n_waypoints)
-    """
+    # pred:   (B, n, 2)
+    # target: (B, n, 2)
+    # mask:   (B, n) or (B, n, 1)
 
-    # Trim pred if needed
+    # Trim pred if necessary
     if pred.size(1) != target.size(1):
         pred = pred[:, :target.size(1), :]
 
-    # --- FIX #1: ensure mask = (B, n, 1) so expands correctly ---
-    if mask.dim() == 2:
-        mask = mask.unsqueeze(-1)    # (B, n, 1)
+    # Compute squared errors
+    dx2 = (pred[..., 0] - target[..., 0]) ** 2   # (B, n)
+    dy2 = (pred[..., 1] - target[..., 1]) ** 2   # (B, n)
 
-    dx2 = (pred[..., 0] - target[..., 0]) ** 2
-    dy2 = (pred[..., 1] - target[..., 1]) ** 2
+    loss = 1.3 * dx2 + dy2                       # (B, n)
 
-    loss = 1.3 * dx2 + dy2           # weighted long/lat
+    # ---- FIX: squeeze mask to match loss ndim ----
+    if mask.dim() == 3 and mask.size(-1) == 1:
+        mask = mask.squeeze(-1)                  # (B, n)
 
-    # --- FIX #2: DO NOT squeeze; it breaks broadcasting ---
-    # mask = mask.squeeze(-1)   # <-- REMOVE
+    # Mask already matches (B, n)
+    loss = loss * mask
 
-    # --- FIX #3: expand to exactly match loss shape ---
-    mask = mask.expand_as(loss)
+    return loss.mean()
 
-    return (loss * mask).mean()
 
 # ------------------------------------------------------
 # Training function
