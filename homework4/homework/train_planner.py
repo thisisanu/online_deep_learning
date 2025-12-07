@@ -16,20 +16,21 @@ import pathlib
 import torch
 import torch.nn.functional as F
 
-def waypoint_loss(pred, target, mask):
+def waypoint_loss(pred, target, mask, long_weight=1.0, lat_weight=2.0):
     """
     pred:   (B, n_waypoints, 2)
     target: (B, n_waypoints, 2)
     mask:   (B, n_waypoints, 1) boolean
     """
+    # Ensure mask has correct shape
     mask_exp = mask.squeeze(-1).unsqueeze(-1).expand_as(pred)
-    
-    long_loss = F.mse_loss(pred[..., 0]*mask.squeeze(-1), target[..., 0]*mask.squeeze(-1))
-    lat_loss  = F.mse_loss(pred[..., 1]*mask.squeeze(-1), target[..., 1]*mask.squeeze(-1))
-    
-    # Emphasize lateral error
-    return long_loss + 2.0 * lat_loss, long_loss.item(), lat_loss.item()
 
+    # Weighted longitudinal / lateral loss
+    long_loss = F.mse_loss(pred[..., 0] * mask.squeeze(-1), target[..., 0] * mask.squeeze(-1), reduction='mean')
+    lat_loss  = F.mse_loss(pred[..., 1] * mask.squeeze(-1), target[..., 1] * mask.squeeze(-1), reduction='mean')
+
+    # Total loss with adjustable weights
+    return long_weight * long_loss + lat_weight * lat_loss
 
 # ------------------------------------------------------
 # Training function
