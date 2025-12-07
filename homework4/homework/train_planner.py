@@ -31,10 +31,14 @@ def waypoint_loss(pred, target, mask):
     dx2 = (pred[..., 0] - target[..., 0]) ** 2
     dy2 = (pred[..., 1] - target[..., 1]) ** 2
 
-    # Weighted loss
-    loss = (1.3 * dx2 + dy2) * mask
-    return loss.mean()
+    loss = 1.3 * dx2 + dy2
 
+    # flatten any trailing singleton dimension in mask
+    if mask.ndim == loss.ndim + 1 and mask.shape[-1] == 1:
+        mask = mask.squeeze(-1)
+
+    mask = mask.expand_as(loss)
+    return (loss * mask).mean()
 
 # ------------------------------------------------------
 # Training function
