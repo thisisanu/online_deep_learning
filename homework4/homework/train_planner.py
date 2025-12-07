@@ -3,11 +3,6 @@ Usage:
     python3 -m homework.train_planner --your_args here
 """
 
-"""
-Usage:
-    python3 -m homework.train_planner --your_args here
-"""
-
 import torch
 from torch.utils.data import DataLoader
 from homework.models import MODEL_FACTORY, save_model
@@ -37,7 +32,7 @@ def waypoint_loss(pred, target, mask):
 
     loss = 1.3 * dx2 + dy2
 
-    # flatten any trailing singleton dimension in mask
+    # Flatten any trailing singleton dimension in mask
     if mask.ndim == loss.ndim and mask.shape[-1] == 1:
         mask = mask.squeeze(-1)
 
@@ -100,14 +95,15 @@ def train(
         total_loss = 0.0
 
         for batch in train_loader:
-            # ------------------------------
-            # STATE_ONLY pipeline
-            # ------------------------------
-            state = batch["state"][:, :].to(device)
-            waypoints = batch["waypoints"][:, :3].to(device)      # (B,3,2)
-            mask = batch["waypoints_mask"][:, :3].to(device)      # (B,3)
+            # STATE_ONLY pipeline uses track_left + track_right
+            track_left = batch["track_left"].to(device)
+            track_right = batch["track_right"].to(device)
 
-            pred = model(state)
+            waypoints = batch["waypoints"][:, :3].to(device)
+            mask = batch["waypoints_mask"][:, :3].to(device)
+
+            # Forward pass
+            pred = model(track_left, track_right)
 
             # SAFETY: ensure pred matches target
             if pred.size(1) != waypoints.size(1):
@@ -120,7 +116,7 @@ def train(
             loss.backward()
             optimizer.step()
 
-            total_loss += loss.item() * state.size(0)
+            total_loss += loss.item() * track_left.size(0)
 
         avg_loss = total_loss / len(train_loader.dataset)
 
@@ -132,18 +128,16 @@ def train(
 
         with torch.no_grad():
             for batch in val_loader:
-                state = batch["state"][:, :].to(device)
-                pred = model(state)
+                track_left = batch["track_left"].to(device)
+                track_right = batch["track_right"].to(device)
+
+                pred = model(track_left, track_right)
 
                 target_waypoints = batch["waypoints"][:, :3].to(device)
                 if pred.size(1) != target_waypoints.size(1):
                     pred = pred[:, :target_waypoints.size(1), :]
 
-                metric.add(
-                    pred,
-                    target_waypoints,
-                    batch["waypoints_mask"][:, :3].to(device)
-                )
+                metric.add(pred, target_waypoints, batch["waypoints_mask"][:, :3].to(device))
 
         results = metric.compute()
 
