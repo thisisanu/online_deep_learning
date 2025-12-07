@@ -13,31 +13,25 @@ import pathlib
 # ------------------------------------------------------
 # Waypoint loss (weighted Long/Lat + mask)
 # ------------------------------------------------------
+import torch
+import torch.nn.functional as F
+
 def waypoint_loss(pred, target, mask):
     """
     pred:   (B, n_waypoints, 2)
     target: (B, n_waypoints, 2)
-    mask:   (B, n_waypoints)
+    mask:   (B, n_waypoints, 1) boolean
     """
-    # SAFETY: trim pred to match target
-    if pred.size(1) != target.size(1):
-        pred = pred[:, :target.size(1), :]
+    # Ensure mask has correct shape
+    mask_exp = mask.squeeze(-1).unsqueeze(-1).expand_as(pred)
 
-    # Ensure mask is broadcastable
-    if mask.dim() == 2:
-        mask = mask.unsqueeze(-1)  # (B, n_waypoints, 1)
+    # Weighted longitudinal / lateral loss
+    long_loss = F.mse_loss(pred[..., 0] * mask.squeeze(-1), target[..., 0] * mask.squeeze(-1), reduction='mean')
+    lat_loss  = F.mse_loss(pred[..., 1] * mask.squeeze(-1), target[..., 1] * mask.squeeze(-1), reduction='mean')
 
-    dx2 = (pred[..., 0] - target[..., 0]) ** 2
-    dy2 = (pred[..., 1] - target[..., 1]) ** 2
+    # Total loss
+    return long_loss + lat_loss
 
-    loss = 1.3 * dx2 + dy2
-
-    # Flatten any trailing singleton dimension in mask
-    if mask.ndim == loss.ndim and mask.shape[-1] == 1:
-        mask = mask.squeeze(-1)
-
-    mask = mask.expand_as(loss)
-    return (loss * mask).mean()
 
 # ------------------------------------------------------
 # Training function
