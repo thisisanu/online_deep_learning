@@ -20,24 +20,25 @@ def waypoint_loss(pred, target, mask):
     mask:   (B, n_waypoints)
     """
 
-    # SAFETY: trim pred to match target
+    # Trim pred if needed
     if pred.size(1) != target.size(1):
         pred = pred[:, :target.size(1), :]
 
-    # Ensure mask is broadcastable
+    # --- FIX #1: ensure mask = (B, n, 1) so expands correctly ---
     if mask.dim() == 2:
-        mask = mask.unsqueeze(-1)  # (B, n_waypoints, 1)
+        mask = mask.unsqueeze(-1)    # (B, n, 1)
 
     dx2 = (pred[..., 0] - target[..., 0]) ** 2
     dy2 = (pred[..., 1] - target[..., 1]) ** 2
 
-    loss = 1.3 * dx2 + dy2
+    loss = 1.3 * dx2 + dy2           # weighted long/lat
 
-    # flatten any trailing singleton dimension in mask
-    if mask.ndim == loss.ndim + 1 and mask.shape[-1] == 1:
-        mask = mask.squeeze(-1)
+    # --- FIX #2: DO NOT squeeze; it breaks broadcasting ---
+    # mask = mask.squeeze(-1)   # <-- REMOVE
 
+    # --- FIX #3: expand to exactly match loss shape ---
     mask = mask.expand_as(loss)
+
     return (loss * mask).mean()
 
 # ------------------------------------------------------
