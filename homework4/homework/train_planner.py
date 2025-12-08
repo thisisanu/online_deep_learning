@@ -144,7 +144,8 @@ def train(
     # --------------------------------------------------
     # Save model
     # --------------------------------------------------
-    save_model(model)
+    save_model(model, "mlp_planner")  # saves with a custom name
+
     print(f"Saved model → {model_name}.th")
 
 
