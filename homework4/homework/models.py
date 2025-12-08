@@ -149,9 +149,22 @@ def load_model(model_name: str, with_weights: bool = False, **model_kwargs) -> n
     return m
 
 
-def save_model(model: nn.Module) -> str:
-    model_name = model.__class__.__name__.lower() + ".th"
+def save_model(model: nn.Module, model_name: str) -> str:
+    """
+    Save a PyTorch model's state dict with a given name.
+
+    Args:
+        model       : the PyTorch model to save
+        model_name  : filename to save (e.g., "mlp_planner.th")
+
+    Returns:
+        str : full path of the saved model
+    """
+    if not model_name.endswith(".th"):
+        model_name += ".th"
+
     path = HOMEWORK_DIR / model_name
     torch.save(model.state_dict(), path)
     print(f"Saved model → {path}")
     return str(path)
+
