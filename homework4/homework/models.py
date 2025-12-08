@@ -223,23 +223,26 @@ def load_model(
     return m
 
 
-def save_model(model: torch.nn.Module) -> str:
-    model_name = None
-    
-    name_priority = ["mlp_planner", "transformer_planner", "cnn_planner", "linear_planner"]
-
-    for n in name_priority:
-        if n in MODEL_FACTORY and type(model) is MODEL_FACTORY[n]:
-            model_name = n
-            break
-
+def save_model(model: nn.Module, model_name: str = None) -> str:
     if model_name is None:
-        raise ValueError(f"Model type '{str(type(model))}' not supported")
+        # auto-detect
+        if isinstance(model, MLPPlanner):
+            model_name = "mlp_planner"
+        elif isinstance(model, TransformerPlanner):
+            model_name = "transformer_planner"
+        elif isinstance(model, CNNPlanner):
+            model_name = "cnn_planner"
+        else:
+            raise ValueError(f"Model type '{str(type(model))}' not supported")
 
-    output_path = HOMEWORK_DIR / f"{model_name}.th"
-    torch.save(model.state_dict(), output_path)
+    if not model_name.endswith(".th"):
+        model_name += ".th"
 
-    return str(output_path)
+    path = HOMEWORK_DIR / model_name
+    torch.save(model.state_dict(), path)
+    print(f"Saved model → {path}")
+    return str(path)
+
 
 
 def calculate_model_size_mb(model: torch.nn.Module) -> float:
