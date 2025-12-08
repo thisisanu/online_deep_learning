@@ -20,15 +20,14 @@ class MLPPlanner(nn.Module):
     Accepts track_left and track_right and outputs grader-ready waypoints.
     """
 
+    class MLPPlanner(nn.Module):
     def __init__(self, n_track=10, n_waypoints=3, hidden_dim=512):
         super().__init__()
         self.n_track = n_track
         self.n_waypoints = n_waypoints
-
         input_dim = n_track * 2 * 2  # left/right * x/y
         output_dim = n_waypoints * 2
 
-        # Simple 3-layer MLP
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
@@ -40,36 +39,11 @@ class MLPPlanner(nn.Module):
         )
 
     def forward(self, track_left, track_right, **kwargs):
-        """
-        Forward pass
-
-        Args:
-            track_left:  (B, n_track, 2) left track points
-            track_right: (B, n_track, 2) right track points
-
-        Returns:
-            pred: (B, n_waypoints, 2) grader-ready waypoints
-        """
         B = track_left.size(0)
-
-        # Compute track center and mean width
-        center = (track_left + track_right) / 2.0                   # (B, n_track, 2)
-        width = (track_right - track_left).mean(dim=1, keepdim=True)  # (B, 1, 2)
-
-        # Normalize track points relative to center and width
-        left_rel = (track_left - center) / (width + 1e-6)
-        right_rel = (track_right - center) / (width + 1e-6)
-
-        # Flatten and pass through MLP
-        x = torch.cat([left_rel, right_rel], dim=1).view(B, -1)
+        x = torch.cat([track_left, track_right], dim=1).view(B, -1)
         out = self.net(x)
+        return out.view(B, self.n_waypoints, 2)
 
-        # Reshape to (B, n_waypoints, 2)
-        pred = out.view(B, self.n_waypoints, 2)
-
-        # Denormalize to grader coordinates (absolute positions)
-        pred = pred * width + center[:, 0:1, :]  # relative to first track point (ego)
-        return pred
 
 # ---------------------------------------------------------------
 # Transformer Planner
