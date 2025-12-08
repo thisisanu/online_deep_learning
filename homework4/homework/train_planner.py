@@ -162,7 +162,7 @@ def train(model_name, epochs=50, lr=0.001, batch_size=32, data_path='drive_data'
                 print(f"New best longitudinal error: {longitudinal_error:.4f}")
             save_model_flag = True
         if save_model_flag:
-            save_path = save_model(model)
+            save_path = save_model(model,model_name)
             print(f"Saved best model to {save_path}")
 
     print("Training completed!")
