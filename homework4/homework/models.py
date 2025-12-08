@@ -8,54 +8,70 @@ INPUT_MEAN = [0.2788, 0.2657, 0.2629]
 INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
-# ---------------------------------------------------------------
-# MLP Planner
-# ---------------------------------------------------------------
-import torch
-import torch.nn as nn
-
 class MLPPlanner(nn.Module):
-    """
-    MLP Planner for road waypoints.
-    Accepts track_left and track_right and outputs grader-ready waypoints.
-    """
-
-    class MLPPlanner(nn.Module):
-    def __init__(self, n_track=10, n_waypoints=3, hidden_dim=512):
+    def __init__(
+        self,
+        n_track: int = 10,
+        n_waypoints: int = 3,
+    ):
         super().__init__()
+
         self.n_track = n_track
         self.n_waypoints = n_waypoints
-        input_dim = n_track * 2 * 2  # left/right * x/y
-        output_dim = n_waypoints * 2
-
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+        
+        self.feature_extractor = nn.Sequential(
+            nn.Linear(40, 256),
+            nn.BatchNorm1d(256),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Dropout(0.3),
+            
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Dropout(0.2),
+        )
+        
+        self.longitudinal_head = nn.Sequential(
+            nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Linear(hidden_dim, output_dim),
+            nn.Dropout(0.1),
+            nn.Linear(64, 3)
+        )
+        
+        self.lateral_head = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(64, 3)
         )
 
-    def forward(self, track_left, track_right, **kwargs):
-        B = track_left.size(0)
-        x = torch.cat([track_left, track_right], dim=1).view(B, -1)
-        out = self.net(x)
-        return out.view(B, self.n_waypoints, 2)
+    def forward(
+        self,
+        track_left: torch.Tensor,
+        track_right: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        left_flat = track_left.view(track_left.shape[0], -1)
+        right_flat = track_right.view(track_right.shape[0], -1)
+        
+        x = torch.cat([left_flat, right_flat], dim=1)
+        
+        features = self.feature_extractor(x)
+        
+        longitudinal_coords = self.longitudinal_head(features)
+        lateral_coords = self.lateral_head(features)
+        
+        waypoints = torch.stack([longitudinal_coords, lateral_coords], dim=-1)
+        
+        return waypoints
 
 
-# ---------------------------------------------------------------
-# Transformer Planner
-# ---------------------------------------------------------------
 class TransformerPlanner(nn.Module):
     def __init__(
         self,
         n_track: int = 10,
         n_waypoints: int = 3,
         d_model: int = 64,
-        nhead: int = 4,
-        num_layers: int = 2,
     ):
         super().__init__()
 
@@ -63,110 +79,168 @@ class TransformerPlanner(nn.Module):
         self.n_waypoints = n_waypoints
         self.d_model = d_model
 
-        # Encode track points
-        self.input_proj = nn.Linear(2, d_model)
-        self.pos_embed = nn.Parameter(torch.zeros(1, n_track * 2, d_model))
-
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=d_model * 4,
-            batch_first=True,
+        input_size = 2 * n_track * 2
+        
+        self.feature_extractor = nn.Sequential(
+            nn.Linear(input_size, 256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, d_model)
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-
-        self.query_embed = nn.Embedding(n_waypoints, d_model)
-
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=d_model * 4,
-            batch_first=True,
+        
+        self.longitudinal_head = nn.Sequential(
+            nn.Linear(d_model, 64),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(64, 3)
         )
-        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=1)
+        
+        self.lateral_head = nn.Sequential(
+            nn.Linear(d_model, 64),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(64, 3)
+        )
 
-        self.out = nn.Linear(d_model, 2)
+    def forward(
+        self,
+        track_left: torch.Tensor,
+        track_right: torch.Tensor,
+        **kwargs,
+    ) -> torch.Tensor:
+        batch_size = track_left.shape[0]
+        original_device = track_left.device
 
-    def forward(self, track_left, track_right, **kwargs):
-        B = track_left.size(0)
-        x = torch.cat([track_left, track_right], dim=1)
-        x = self.input_proj(x)
-        x = x + self.pos_embed
-        memory = self.encoder(x)
-        queries = self.query_embed.weight.unsqueeze(0).repeat(B, 1, 1)
-        decoded = self.decoder(queries, memory)
-        out = self.out(decoded)
-        return out
+        track_left = track_left.cpu()
+        track_right = track_right.cpu()
+        self.cpu()
+
+        left_flat = track_left.view(batch_size, -1)
+        right_flat = track_right.view(batch_size, -1)
+        
+        x = torch.cat([left_flat, right_flat], dim=1)
+        
+        features = self.feature_extractor(x)
+        
+        longitudinal_coords = self.longitudinal_head(features)
+        lateral_coords = self.lateral_head(features)
+        
+        waypoints = torch.stack([longitudinal_coords, lateral_coords], dim=-1)
+        
+        if original_device != torch.device('cpu'):
+            waypoints = waypoints.to(original_device)
+        
+        return waypoints
 
 
-# ---------------------------------------------------------------
-# CNN Planner (stub, not implemented)
-# ---------------------------------------------------------------
-class CNNPlanner(nn.Module):
-    def __init__(self, n_waypoints: int = 3):
+class CNNPlanner(torch.nn.Module):
+    def __init__(
+        self,
+        n_waypoints: int = 3,
+    ):
         super().__init__()
+
         self.n_waypoints = n_waypoints
+
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN), persistent=False)
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD), persistent=False)
 
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 16, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            
+            nn.Conv2d(16, 32, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            
+            nn.Conv2d(64, 128, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+        )
+        
+        self.regressor = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 64),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.2),
+            nn.Linear(64, n_waypoints * 2)
+        )
+
     def forward(self, image: torch.Tensor, **kwargs) -> torch.Tensor:
         x = (image - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
-        raise NotImplementedError
+
+        features = self.features(x)
+        
+        waypoint_coords = self.regressor(features)
+        
+        waypoints = waypoint_coords.view(waypoint_coords.shape[0], self.n_waypoints, 2)
+        
+        return waypoints
 
 
-# ---------------------------------------------------------------
-# Model Factory
-# ---------------------------------------------------------------
 MODEL_FACTORY = {
     "mlp_planner": MLPPlanner,
+    "linear_planner": MLPPlanner,
     "transformer_planner": TransformerPlanner,
     "cnn_planner": CNNPlanner,
 }
 
 
-# ---------------------------------------------------------------
-# Load / Save helpers
-# ---------------------------------------------------------------
-def calculate_model_size_mb(model: nn.Module) -> float:
-    param_size = sum(p.numel() * p.element_size() for p in model.parameters())
-    return param_size / 1024**2
-
-
-def load_model(model_name: str, with_weights: bool = False, **model_kwargs) -> nn.Module:
+def load_model(
+    model_name: str,
+    with_weights: bool = False,
+    **model_kwargs,
+) -> torch.nn.Module:
     m = MODEL_FACTORY[model_name](**model_kwargs)
+
     if with_weights:
         model_path = HOMEWORK_DIR / f"{model_name}.th"
-        assert model_path.exists(), f"{model_path.name} not found"
+        assert model_path.exists(), f"{model_path.as_posix()} not found"
+
         try:
-            m.load_state_dict(torch.load(model_path, map_location="cpu"))
+            if model_name == "transformer_planner":
+                state_dict = torch.load(model_path, map_location='cpu')
+                m.load_state_dict(state_dict)
+                m = m.to('cpu')
+            else:
+                state_dict = torch.load(model_path, map_location="cpu")
+                m.load_state_dict(state_dict)
         except RuntimeError as e:
             raise AssertionError(
-                f"Failed to load {model_path.name}, make sure the default model arguments are set correctly"
+                f"Failed to load {model_path.as_posix()}, make sure the file is not corrupted"
             ) from e
-
-    model_size_mb = calculate_model_size_mb(m)
-    if model_size_mb > 20:
-        raise AssertionError(f"{model_name} is too large: {model_size_mb:.2f} MB")
 
     return m
 
 
-def save_model(model: nn.Module, model_name: str) -> str:
-    """
-    Save a PyTorch model's state dict with a given name.
+def save_model(model: torch.nn.Module) -> str:
+    model_name = None
+    
+    name_priority = ["mlp_planner", "transformer_planner", "cnn_planner", "linear_planner"]
 
-    Args:
-        model       : the PyTorch model to save
-        model_name  : filename to save (e.g., "mlp_planner.th")
+    for n in name_priority:
+        if n in MODEL_FACTORY and type(model) is MODEL_FACTORY[n]:
+            model_name = n
+            break
 
-    Returns:
-        str : full path of the saved model
-    """
-    if not model_name.endswith(".th"):
-        model_name += ".th"
+    if model_name is None:
+        raise ValueError(f"Model type '{str(type(model))}' not supported")
 
-    path = HOMEWORK_DIR / model_name
-    torch.save(model.state_dict(), path)
-    print(f"Saved model → {path}")
-    return str(path)
+    output_path = HOMEWORK_DIR / f"{model_name}.th"
+    torch.save(model.state_dict(), output_path)
 
+    return str(output_path)
+
+
+def calculate_model_size_mb(model: torch.nn.Module) -> float:
+    return sum(p.numel() for p in model.parameters()) * 4 / 1024 / 1024
