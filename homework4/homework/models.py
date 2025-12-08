@@ -12,7 +12,7 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 # MLP Planner
 # ---------------------------------------------------------------
 class MLPPlanner(nn.Module):
-    def __init__(self, n_track=10, n_waypoints=3):
+    def __init__(self, n_track=10, n_waypoints=3, hidden_dim=512):
         super().__init__()
 
         self.n_track = n_track
@@ -20,7 +20,6 @@ class MLPPlanner(nn.Module):
 
         input_dim = n_track * 2 * 2  # (left/right) * (x/y)
         output_dim = n_waypoints * 2
-        hidden_dim = 320
 
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -33,14 +32,39 @@ class MLPPlanner(nn.Module):
         )
 
     def forward(self, track_left, track_right, **kwargs):
+        """
+        Inputs:
+            track_left:  (B, n_track, 2)
+            track_right: (B, n_track, 2)
+        Output:
+            waypoints: (B, n_waypoints, 2)
+        """
         B = track_left.size(0)
-        x = torch.cat([track_left, track_right], dim=1)
-        mean = x.mean(dim=1, keepdim=True)
-        std = x.std(dim=1, keepdim=True, unbiased=False).clamp(min=1e-6)
-        x = (x - mean) / std
+
+        # 1️⃣ Compute track center and width
+        track_center = (track_left + track_right) / 2.0          # (B, n_track, 2)
+        track_width = (track_right - track_left).mean(dim=1, keepdim=True)  # (B, 1, 2)
+
+        # 2️⃣ Normalize relative to first track point (ego)
+        track_rel = track_center - track_center[:, 0:1, :]       # (B, n_track, 2)
+
+        # 3️⃣ Optionally scale by average track width to keep lateral coords in [-1,1]
+        track_scaled = track_rel / (track_width + 1e-6)
+
+        # 4️⃣ Concatenate left/right track info (scaled)
+        left_rel = (track_left - track_center) / (track_width + 1e-6)
+        right_rel = (track_right - track_center) / (track_width + 1e-6)
+        x = torch.cat([left_rel, right_rel], dim=1)             # (B, n_track*2, 2)
+
+        # 5️⃣ Flatten
         x = x.view(B, -1)
+
+        # 6️⃣ Forward through MLP
         out = self.net(x)
+
+        # 7️⃣ Reshape output to (B, n_waypoints, 2)
         return out.view(B, self.n_waypoints, 2)
+
 
 
 # ---------------------------------------------------------------
