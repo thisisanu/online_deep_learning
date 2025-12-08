@@ -32,38 +32,28 @@ class MLPPlanner(nn.Module):
         )
 
     def forward(self, track_left, track_right, **kwargs):
-        """
-        Inputs:
-            track_left:  (B, n_track, 2)
-            track_right: (B, n_track, 2)
-        Output:
-            waypoints: (B, n_waypoints, 2)
-        """
         B = track_left.size(0)
-
-        # 1️⃣ Compute track center and width
-        track_center = (track_left + track_right) / 2.0          # (B, n_track, 2)
-        track_width = (track_right - track_left).mean(dim=1, keepdim=True)  # (B, 1, 2)
-
-        # 2️⃣ Normalize relative to first track point (ego)
-        track_rel = track_center - track_center[:, 0:1, :]       # (B, n_track, 2)
-
-        # 3️⃣ Optionally scale by average track width to keep lateral coords in [-1,1]
-        track_scaled = track_rel / (track_width + 1e-6)
-
-        # 4️⃣ Concatenate left/right track info (scaled)
+        n_track = self.n_track
+    
+        # Track center and width
+        track_center = (track_left + track_right) / 2.0        # (B, n_track, 2)
+        track_width = (track_right - track_left).mean(dim=1, keepdim=True)  # (B,1,2)
+    
+        # Relative positions
         left_rel = (track_left - track_center) / (track_width + 1e-6)
         right_rel = (track_right - track_center) / (track_width + 1e-6)
-        x = torch.cat([left_rel, right_rel], dim=1)             # (B, n_track*2, 2)
-
-        # 5️⃣ Flatten
+    
+        x = torch.cat([left_rel, right_rel], dim=1)
         x = x.view(B, -1)
-
-        # 6️⃣ Forward through MLP
         out = self.net(x)
+        
+        # Reshape
+        pred = out.view(B, self.n_waypoints, 2)
+        
+        # ✅ Denormalize to grader coordinates
+        pred = pred * track_width + track_center[:, 0:1, :]  # first track point = ego car
+        return pred
 
-        # 7️⃣ Reshape output to (B, n_waypoints, 2)
-        return out.view(B, self.n_waypoints, 2)
 
 
 
