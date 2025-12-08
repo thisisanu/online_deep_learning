@@ -11,16 +11,24 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 # ---------------------------------------------------------------
 # MLP Planner
 # ---------------------------------------------------------------
+import torch
+import torch.nn as nn
+
 class MLPPlanner(nn.Module):
+    """
+    MLP Planner for road waypoints.
+    Accepts track_left and track_right and outputs grader-ready waypoints.
+    """
+
     def __init__(self, n_track=10, n_waypoints=3, hidden_dim=512):
         super().__init__()
-
         self.n_track = n_track
         self.n_waypoints = n_waypoints
 
-        input_dim = n_track * 2 * 2  # (left/right) * (x/y)
+        input_dim = n_track * 2 * 2  # left/right * x/y
         output_dim = n_waypoints * 2
 
+        # Simple 3-layer MLP
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
@@ -32,30 +40,36 @@ class MLPPlanner(nn.Module):
         )
 
     def forward(self, track_left, track_right, **kwargs):
+        """
+        Forward pass
+
+        Args:
+            track_left:  (B, n_track, 2) left track points
+            track_right: (B, n_track, 2) right track points
+
+        Returns:
+            pred: (B, n_waypoints, 2) grader-ready waypoints
+        """
         B = track_left.size(0)
-        n_track = self.n_track
-    
-        # Track center and width
-        track_center = (track_left + track_right) / 2.0        # (B, n_track, 2)
-        track_width = (track_right - track_left).mean(dim=1, keepdim=True)  # (B,1,2)
-    
-        # Relative positions
-        left_rel = (track_left - track_center) / (track_width + 1e-6)
-        right_rel = (track_right - track_center) / (track_width + 1e-6)
-    
-        x = torch.cat([left_rel, right_rel], dim=1)
-        x = x.view(B, -1)
+
+        # Compute track center and mean width
+        center = (track_left + track_right) / 2.0                   # (B, n_track, 2)
+        width = (track_right - track_left).mean(dim=1, keepdim=True)  # (B, 1, 2)
+
+        # Normalize track points relative to center and width
+        left_rel = (track_left - center) / (width + 1e-6)
+        right_rel = (track_right - center) / (width + 1e-6)
+
+        # Flatten and pass through MLP
+        x = torch.cat([left_rel, right_rel], dim=1).view(B, -1)
         out = self.net(x)
-        
-        # Reshape
+
+        # Reshape to (B, n_waypoints, 2)
         pred = out.view(B, self.n_waypoints, 2)
-        
-        # ✅ Denormalize to grader coordinates
-        pred = pred * track_width + track_center[:, 0:1, :]  # first track point = ego car
+
+        # Denormalize to grader coordinates (absolute positions)
+        pred = pred * width + center[:, 0:1, :]  # relative to first track point (ego)
         return pred
-
-
-
 
 # ---------------------------------------------------------------
 # Transformer Planner
