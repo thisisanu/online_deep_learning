@@ -14,10 +14,10 @@ from pathlib import Path
 import argparse
 import time
 
-# Correct relative imports
-from .datasets.drive_dataset import SuperTuxDataset, load_data
-from .models import Detector, load_model, save_model
-from .metrics import AccuracyMetric, ConfusionMatrix, DepthErrorMetric
+# Absolute imports for Colab
+from homework.datasets.classification_dataset import SuperTuxDataset, load_data
+from homework.models import Detector, load_model, save_model
+from homework.metrics import AccuracyMetric, ConfusionMatrix, DepthErrorMetric
 
 
 # ------------------------------------------------------------
@@ -48,28 +48,21 @@ def train_detection(
     device = get_device()
     print_banner(f"Training Detector on device: {device}")
 
-    # --------------------------------------------------------
     # Load model
-    # --------------------------------------------------------
     model = load_model("detector", in_channels=3, num_classes=3)
     model = model.to(device)
 
-    # --------------------------------------------------------
     # Loss functions
-    # --------------------------------------------------------
     ce_loss = nn.CrossEntropyLoss()
     l1_loss = nn.L1Loss()
 
-    # --------------------------------------------------------
     # Optimizer
-    # --------------------------------------------------------
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    # --------------------------------------------------------
     # Data
-    # --------------------------------------------------------
     dataset_path = Path(dataset_path)
-    train_data, val_data = load_data(dataset_path)
+    train_data = load_data(dataset_path / "train", transform_pipeline="default", return_dataloader=False)
+    val_data = load_data(dataset_path / "val", transform_pipeline="default", return_dataloader=False)
 
     train_loader = DataLoader(
         train_data,
@@ -87,15 +80,11 @@ def train_detection(
         pin_memory=True,
     )
 
-    # --------------------------------------------------------
     # Metrics
-    # --------------------------------------------------------
     cm = ConfusionMatrix(num_classes=3)
     depth_metric = DepthErrorMetric()
 
-    # --------------------------------------------------------
     # Training
-    # --------------------------------------------------------
     print_banner("Starting Training")
 
     for epoch in range(1, epochs + 1):
