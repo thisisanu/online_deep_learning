@@ -14,11 +14,11 @@ from pathlib import Path
 import argparse
 import time
 
-from datasets.classification_dataset import SuperTuxClassificationDataset, get_class_names, load_data
+# Correct import: use SuperTuxDataset
+from datasets.classification_dataset import SuperTuxDataset, get_class_names, load_data
 from .models import Classifier
-
 from .metrics import AccuracyMetric
-
+from .models import load_model, save_model  # make sure load_model/save_model are imported
 
 # ------------------------------------------------------------
 # Utilities
