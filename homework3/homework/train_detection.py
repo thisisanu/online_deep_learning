@@ -14,10 +14,10 @@ from pathlib import Path
 import argparse
 import time
 
-# Absolute imports for Colab
-from homework.datasets.classification_dataset import SuperTuxDataset, load_data
-from homework.models import Detector, load_model, save_model
-from homework.metrics import AccuracyMetric, ConfusionMatrix, DepthErrorMetric
+# Correct relative imports
+from .datasets.classification_dataset import SuperTuxDataset, load_data
+from .models import Detector, load_model, save_model
+from .metrics import AccuracyMetric, ConfusionMatrix, DetectionMetric
 
 
 # ------------------------------------------------------------
@@ -48,21 +48,28 @@ def train_detection(
     device = get_device()
     print_banner(f"Training Detector on device: {device}")
 
+    # --------------------------------------------------------
     # Load model
+    # --------------------------------------------------------
     model = load_model("detector", in_channels=3, num_classes=3)
     model = model.to(device)
 
+    # --------------------------------------------------------
     # Loss functions
+    # --------------------------------------------------------
     ce_loss = nn.CrossEntropyLoss()
     l1_loss = nn.L1Loss()
 
+    # --------------------------------------------------------
     # Optimizer
+    # --------------------------------------------------------
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
+    # --------------------------------------------------------
     # Data
+    # --------------------------------------------------------
     dataset_path = Path(dataset_path)
-    train_data = load_data(dataset_path / "train", transform_pipeline="default", return_dataloader=False)
-    val_data = load_data(dataset_path / "val", transform_pipeline="default", return_dataloader=False)
+    train_data, val_data = load_data(dataset_path)
 
     train_loader = DataLoader(
         train_data,
@@ -80,11 +87,14 @@ def train_detection(
         pin_memory=True,
     )
 
+    # --------------------------------------------------------
     # Metrics
-    cm = ConfusionMatrix(num_classes=3)
-    depth_metric = DepthErrorMetric()
+    # --------------------------------------------------------
+    metrics = DetectionMetric(num_classes=3)
 
+    # --------------------------------------------------------
     # Training
+    # --------------------------------------------------------
     print_banner("Starting Training")
 
     for epoch in range(1, epochs + 1):
@@ -112,10 +122,10 @@ def train_detection(
         avg_loss = running_loss / len(train_loader)
         print(f"[Epoch {epoch}]  Loss = {avg_loss:.4f}   ({dt:.1f} sec)")
 
+        # ----------------------------------------------------
         # Validation
-        model.eval()
-        cm.reset()
-        depth_metric.reset()
+        # ----------------------------------------------------
+        metrics.reset()
 
         with torch.inference_mode():
             for batch in val_loader:
@@ -124,18 +134,16 @@ def train_detection(
                 seg_tgt = batch["track"].to(device)
 
                 seg_pred, depth_pred = model.predict(img)
-                cm.add(seg_pred, seg_tgt)
-                depth_metric.add(depth_pred, depth_tgt, seg_tgt)
+                metrics.add(seg_pred, seg_tgt, depth_pred, depth_tgt)
 
-        iou = cm.iou().mean().item()
-        mae = depth_metric.mae()
-        mae_lane = depth_metric.mae_lane_only()
+        results = metrics.compute()
+        print(f"  Val mIoU:       {results['iou']:.4f}")
+        print(f"  Val MAE:        {results['abs_depth_error']:.4f}")
+        print(f"  Val MAE lanes:  {results['tp_depth_error']:.4f}")
 
-        print(f"  Val mIoU:       {iou:.4f}")
-        print(f"  Val MAE:        {mae:.4f}")
-        print(f"  Val MAE lanes:  {mae_lane:.4f}")
-
+    # --------------------------------------------------------
     # Save final model
+    # --------------------------------------------------------
     print_banner("Saving Model")
     path = save_model(model)
     print(f"Model saved to: {path}")
