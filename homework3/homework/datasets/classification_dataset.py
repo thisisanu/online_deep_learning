@@ -64,63 +64,8 @@ class SuperTuxDataset(Dataset):
 
         return data
 
-
-from pathlib import Path
-from torch.utils.data import DataLoader
-
-def load_data(
-    dataset_path: str | Path,
-    transform_pipeline: str = "default",
-    return_dataloader: bool = True,
-    num_workers: int = 2,
-    batch_size: int = 128,
-) -> tuple:
-    """
-    Constructs train and val datasets/dataloaders.
-    The specified transform_pipeline must be implemented in the SuperTuxDataset class.
-
-    Args:
-        dataset_path (str | Path): root folder containing 'train' and 'val' subfolders
-        transform_pipeline (str): 'default', 'aug', or other custom transformation pipelines
-        return_dataloader (bool): returns either DataLoader or Dataset
-        num_workers (int): data workers, set to 0 for debugging
-        batch_size (int): batch size
-
-    Returns:
-        Tuple of (train_dataset_or_loader, val_dataset_or_loader)
-    """
-    dataset_path = Path(dataset_path)
-    train_path = dataset_path / "train"
-    val_path = dataset_path / "val"
-
-    if not train_path.exists() or not val_path.exists():
-        raise FileNotFoundError(
-            f"Expected folders 'train' and 'val' inside {dataset_path}"
-        )
-
-    train_dataset = SuperTuxDataset(train_path, transform_pipeline=transform_pipeline)
-    val_dataset = SuperTuxDataset(val_path, transform_pipeline=transform_pipeline)
-
-    if not return_dataloader:
-        return train_dataset, val_dataset
-
-    train_loader = DataLoader(
-        train_dataset,
-        num_workers=num_workers,
-        batch_size=batch_size,
-        shuffle=True,
-        drop_last=True,
-        pin_memory=True,
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        num_workers=num_workers,
-        batch_size=batch_size,
-        shuffle=False,
-        drop_last=False,
-        pin_memory=True,
-    )
-
-    return train_loader, val_loader
+def load_data(dataset_path, transform_pipeline="default"):
+    train_dataset = SuperTuxDataset(dataset_path / "train", transform_pipeline)
+    val_dataset = SuperTuxDataset(dataset_path / "val", transform_pipeline)
+    return train_dataset, val_dataset
 
