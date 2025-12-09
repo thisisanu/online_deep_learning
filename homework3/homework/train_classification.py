@@ -14,8 +14,8 @@ from pathlib import Path
 import argparse
 import time
 
-from homework.datasets.classification_dataset import SuperTuxClassificationDataset, get_class_names, load_data
-from homework.models import Classifier
+from datasets.classification_dataset import SuperTuxClassificationDataset, get_class_names, load_data
+from .models import Classifier
 
 from .metrics import AccuracyMetric
 
