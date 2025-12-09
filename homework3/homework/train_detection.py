@@ -1,112 +1,194 @@
+"""
+Train script for Homework 3 — Detection (Segmentation + Depth)
+
+Run using:
+    python -m homework.train_detection
+"""
+
+from __future__ import annotations
+
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
 from pathlib import Path
+import argparse
+import time
 
-import numpy as np
-from torch.utils.data import ConcatDataset, DataLoader, Dataset
+# Correct relative imports
+from .datasets.classification_dataset import SuperTuxDataset, load_data
+from .models import Detector, load_model, save_model
+from .metrics import ConfusionMatrix, DetectionMetric
 
-from . import road_transforms
-from .road_utils import Track
+
+# ------------------------------------------------------------
+# Utilities
+# ------------------------------------------------------------
+
+def get_device() -> torch.device:
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class RoadDataset(Dataset):
+def print_banner(msg: str):
+    print("\n" + "=" * 60)
+    print(msg)
+    print("=" * 60 + "\n")
+
+
+def collate_fn(batch):
     """
-    SuperTux dataset for road detection
+    Custom collate function for dict datasets
+    Converts list of dicts into dict of stacked tensors
     """
-
-    def __init__(
-        self,
-        episode_path: str,
-        transform_pipeline: str = "default",
-    ):
-        super().__init__()
-
-        self.episode_path = Path(episode_path)
-
-        info = np.load(self.episode_path / "info.npz", allow_pickle=True)
-
-        self.track = Track(**info["track"].item())
-        self.frames: dict[str, np.ndarray] = {k: np.stack(v) for k, v in info["frames"].item().items()}
-        self.transform = self.get_transform(transform_pipeline)
-
-    def get_transform(self, transform_pipeline: str):
-        xform = None
-
-        if transform_pipeline == "default":
-            xform = road_transforms.Compose(
-                [
-                    road_transforms.ImageLoader(self.episode_path),
-                    road_transforms.DepthLoader(self.episode_path),
-                    road_transforms.TrackProcessor(self.track),
-                ]
-            )
-        elif transform_pipeline == "aug":
-            pass
-
-        if xform is None:
-            raise ValueError(f"Invalid transform {transform_pipeline} specified!")
-
-        return xform
-
-    def __len__(self):
-        return len(self.frames["location"])
-
-    def __getitem__(self, idx: int):
-        """
-        Returns:
-            dict: sample data with keys "image", "depth", "track"
-        """
-        sample = {"_idx": idx, "_frames": self.frames}
-        sample = self.transform(sample)
-
-        # remove private keys
-        for key in list(sample.keys()):
-            if key.startswith("_"):
-                sample.pop(key)
-
-        return sample
+    out = {}
+    for key in batch[0].keys():
+        out[key] = torch.stack([torch.tensor(item[key]) if not isinstance(item[key], torch.Tensor) else item[key] for item in batch])
+    return out
 
 
-def load_data(
-    dataset_path: str,
-    transform_pipeline: str = "default",
-    return_dataloader: bool = True,
+# ------------------------------------------------------------
+# Training loop
+# ------------------------------------------------------------
+
+def train_detection(
+    dataset_path: str | Path = "classification_data",
+    batch_size: int = 16,
+    epochs: int = 5,
+    lr: float = 1e-3,
     num_workers: int = 2,
-    batch_size: int = 32,
-    shuffle: bool = False,
-) -> DataLoader | Dataset:
-    """
-    Constructs the dataset/dataloader.
-    The specified transform_pipeline must be implemented in the RoadDataset class.
+):
+    device = get_device()
+    print_banner(f"Training Detector on device: {device}")
 
-    Args:
-        transform_pipeline (str): 'default', 'aug', or other custom transformation pipelines
-        return_dataloader (bool): returns either DataLoader or Dataset
-        num_workers (int): data workers, set to 0 for VSCode debugging
-        batch_size (int): batch size
-        shuffle (bool): should be true for train and false for val
+    # --------------------------------------------------------
+    # Load model
+    # --------------------------------------------------------
+    model = load_model("detector", in_channels=3, num_classes=3)
+    model = model.to(device)
 
-    Returns:
-        DataLoader or Dataset
-    """
+    # --------------------------------------------------------
+    # Loss functions
+    # --------------------------------------------------------
+    ce_loss = nn.CrossEntropyLoss()
+    l1_loss = nn.L1Loss()
+
+    # --------------------------------------------------------
+    # Optimizer
+    # --------------------------------------------------------
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    # --------------------------------------------------------
+    # Data
+    # --------------------------------------------------------
     dataset_path = Path(dataset_path)
-    scenes = [x for x in dataset_path.iterdir() if x.is_dir()]
+    train_dataset = SuperTuxDataset(dataset_path / "train")
+    val_dataset = SuperTuxDataset(dataset_path / "val")
 
-    # can pass in a single scene like "road_data/val/cornfield_crossing_04"
-    if not scenes and dataset_path.is_dir():
-        scenes = [dataset_path]
-
-    datasets = []
-    for episode_path in sorted(scenes):
-        datasets.append(RoadDataset(episode_path, transform_pipeline=transform_pipeline))
-    dataset = ConcatDataset(datasets)
-
-    print(f"Loaded {len(dataset)} samples from {len(datasets)} episodes")
-
-    if not return_dataloader:
-        return dataset
-
-    return DataLoader(
-        dataset,
-        num_workers=num_workers,
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+        collate_fn=collate_fn,  # <-- added
     )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+        collate_fn=collate_fn,  # <-- added
+    )
+
+    # --------------------------------------------------------
+    # Metrics
+    # --------------------------------------------------------
+    metric = DetectionMetric(num_classes=3)
+
+    # --------------------------------------------------------
+    # Training
+    # --------------------------------------------------------
+    print_banner("Starting Training")
+
+    for epoch in range(1, epochs + 1):
+        model.train()
+        t0 = time.time()
+        running_loss = 0.0
+
+        for batch in train_loader:
+
+            # <-- dict access
+            img       = batch["image"].to(device)
+            seg_tgt   = batch["track"].to(device)
+            depth_tgt = batch["depth"].to(device)
+
+            optimizer.zero_grad()
+            seg_logits, depth_pred = model(img)
+
+            loss_seg = ce_loss(seg_logits, seg_tgt)
+            loss_depth = l1_loss(depth_pred, depth_tgt)
+            loss = loss_seg + loss_depth
+
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+
+        dt = time.time() - t0
+        avg_loss = running_loss / len(train_loader)
+        print(f"[Epoch {epoch}]  Loss = {avg_loss:.4f}   ({dt:.1f} sec)")
+
+        # Validation
+        model.eval()
+        metric.reset()
+
+        with torch.inference_mode():
+            for batch in val_loader:
+
+                img       = batch["image"].to(device)
+                seg_tgt   = batch["track"].to(device)
+                depth_tgt = batch["depth"].to(device)
+
+                seg_pred, depth_pred = model.predict(img)
+                metric.add(seg_pred, seg_tgt, depth_pred, depth_tgt)
+
+        results = metric.compute()
+        print(f"  Val mIoU:       {results['iou']:.4f}")
+        print(f"  Val Accuracy:   {results['accuracy']:.4f}")
+        print(f"  Val Depth MAE:  {results['abs_depth_error']:.4f}")
+        print(f"  Val Depth TP:   {results['tp_depth_error']:.4f}")
+
+    # Save final model
+    print_banner("Saving Model")
+    path = save_model(model)
+    print(f"Model saved to: {path}")
+    return path
+
+
+# ------------------------------------------------------------
+# Entry point
+# ------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="classification_data",  # change to your detection dataset folder
+        help="Path to dataset",
+    )
+    parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    args = parser.parse_args()
+
+    train_detection(
+        dataset_path=args.dataset,
+        batch_size=args.batch,
+        epochs=args.epochs,
+        lr=args.lr,
+    )
+
+
+if __name__ == "__main__":
+    main()
