@@ -127,7 +127,8 @@ def train_classification(
                 pred = model.predict(img)
                 acc.add(pred, labels)
 
-        print(f"  Val Accuracy:  {acc.value():.4f}")
+        print(f"  Val Accuracy:  {acc.compute():.4f}")
+
 
     # --------------------------------------------------------
     # Save final model
