@@ -104,10 +104,11 @@ def train_detection(
         running_loss = 0.0
 
         for batch in train_loader:
-            img, seg_tgt, depth_tgt = batch  # unpack dataset tuple
-            img = img.to(device)
-            seg_tgt = seg_tgt.to(device)
-            depth_tgt = depth_tgt.to(device)
+
+            ### FIXED — your dataset returns a dict, not a tuple
+            img       = batch["image"].to(device)
+            seg_tgt   = batch["track"].to(device)    # segmentation labels
+            depth_tgt = batch["depth"].to(device)
 
             optimizer.zero_grad()
             seg_logits, depth_pred = model(img)
@@ -130,10 +131,11 @@ def train_detection(
 
         with torch.inference_mode():
             for batch in val_loader:
-                img, seg_tgt, depth_tgt = batch
-                img = img.to(device)
-                seg_tgt = seg_tgt.to(device)
-                depth_tgt = depth_tgt.to(device)
+
+                ### FIXED — dict access again
+                img       = batch["image"].to(device)
+                seg_tgt   = batch["track"].to(device)
+                depth_tgt = batch["depth"].to(device)
 
                 seg_pred, depth_pred = model.predict(img)
                 metric.add(seg_pred, seg_tgt, depth_pred, depth_tgt)
