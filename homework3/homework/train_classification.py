@@ -149,9 +149,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--transform", type=str, default="default")
-    parser.add_argument("--dataset", type=str, required=True, help="Path to classification dataset")
-
-
+   
     args = parser.parse_args()
 
     train_classification(
