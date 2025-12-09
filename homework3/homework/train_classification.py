@@ -67,7 +67,9 @@ def train_classification(
     dataset_path = Path("classification_data")  
 
     # load_data returns both train and val datasets
-    train_data, val_data = load_data(dataset_path, transform_pipeline=transform)
+    # Create datasets for train and val
+    train_data = SuperTuxDataset(dataset_path / "train", transform_pipeline=transform)
+    val_data   = SuperTuxDataset(dataset_path / "val", transform_pipeline=transform)
 
     train_loader = DataLoader(
         train_data,
