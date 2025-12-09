@@ -1,142 +1,161 @@
-import sys
-import os
-import copy
-from pathlib import Path
+"""
+Train script for Homework 3 — Classification
+
+Run using:
+    python -m homework.train_classification
+"""
+
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader
-import torchvision.transforms as transforms
-from torchvision.models import resnet18, ResNet18_Weights
+from pathlib import Path
+import argparse
+import time
 
-# -----------------------------
-# Fix imports
-# -----------------------------
-homework_path = Path(__file__).resolve().parent
-sys.path.insert(0, str(homework_path))
+from .models import load_model, save_model
+from .datasets.classification_dataset import load_data
+from .metrics import AccuracyMetric
 
-from datasets.classification_dataset import SuperTuxClassificationDataset, get_class_names
 
-# -----------------------------
-# Hyperparameters
-# -----------------------------
-DATA_DIR = "./classification_data"
-BATCH_SIZE = 64
-EPOCHS = 15
-LR = 1e-4
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# ------------------------------------------------------------
+# Utilities
+# ------------------------------------------------------------
 
-# -----------------------------
-# Classes
-# -----------------------------
-class_names = get_class_names(DATA_DIR, split="train")
-num_classes = len(class_names)
-print(f"Found classes: {class_names}")
+def get_device() -> torch.device:
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# -----------------------------
-# Data transforms
-# -----------------------------
-train_transforms = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.RandomHorizontalFlip(),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
-])
 
-val_transforms = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
-])
+def print_banner(msg: str):
+    print("\n" + "=" * 60)
+    print(msg)
+    print("=" * 60 + "\n")
 
-# -----------------------------
-# Dataset & loaders
-# -----------------------------
-train_dataset = SuperTuxClassificationDataset(DATA_DIR, split="train", transform=train_transforms)
-val_dataset = SuperTuxClassificationDataset(DATA_DIR, split="val", transform=val_transforms)
 
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
-val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
-
-dataset_sizes = {"train": len(train_dataset), "val": len(val_dataset)}
-
-# -----------------------------
-# Model
-# -----------------------------
-weights = ResNet18_Weights.DEFAULT
-model = resnet18(weights=weights)
-model.fc = nn.Linear(model.fc.in_features, num_classes)
-model = model.to(DEVICE)
-
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=LR)
-
-# -----------------------------
-# Sanity check
-# -----------------------------
-print("\n[Sanity Check] Running one batch...")
-inputs, labels = next(iter(train_loader))
-inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
-model.eval()
-with torch.inference_mode():
-    outputs = model(inputs)
-    _, preds = torch.max(outputs, 1)
-    print(f"Input: {inputs.shape}, Output: {outputs.shape}, Preds: {preds.shape}")
-print("[Sanity Check Passed]\n")
-
-# -----------------------------
+# ------------------------------------------------------------
 # Training loop
-# -----------------------------
-best_model_wts = copy.deepcopy(model.state_dict())
-best_acc = 0.0
+# ------------------------------------------------------------
 
-for epoch in range(EPOCHS):
-    print(f"Epoch {epoch+1}/{EPOCHS}\n" + "-"*25)
-    for phase in ["train", "val"]:
-        if phase == "train":
-            model.train()
-            loader = train_loader
-        else:
-            model.eval()
-            loader = val_loader
+def train_classification(
+    batch_size: int = 32,
+    epochs: int = 5,
+    lr: float = 1e-3,
+    num_workers: int = 2,
+    transform: str = "default",  # pass e.g. "augmented" if you added augmentations
+):
+    device = get_device()
+    print_banner(f"Training Classifier on device: {device}")
+
+    # --------------------------------------------------------
+    # Load model
+    # --------------------------------------------------------
+    model = load_model("classifier", in_channels=3, num_classes=6)
+    model = model.to(device)
+
+    # --------------------------------------------------------
+    # Loss + Optimizer
+    # --------------------------------------------------------
+    ce_loss = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    # --------------------------------------------------------
+    # Data loading
+    # --------------------------------------------------------
+    train_data, val_data = load_data(transform_pipeline=transform)
+
+    train_loader = DataLoader(
+        train_data,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    val_loader = DataLoader(
+        val_data,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    # --------------------------------------------------------
+    # Training
+    # --------------------------------------------------------
+    print_banner("Starting Training")
+
+    for epoch in range(1, epochs + 1):
+        model.train()
+        t0 = time.time()
 
         running_loss = 0.0
-        running_corrects = 0
 
-        for inputs, labels in loader:
-            inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
+        for batch in train_loader:
+            img = batch["image"].to(device)         # (B,3,64,64)
+            labels = batch["label"].to(device)      # (B,)
+
             optimizer.zero_grad()
 
-            with torch.set_grad_enabled(phase=="train"):
-                outputs = model(inputs)
-                _, preds = torch.max(outputs, 1)
-                loss = criterion(outputs, labels)
-                if phase == "train":
-                    loss.backward()
-                    optimizer.step()
+            logits = model(img)
+            loss = ce_loss(logits, labels)
 
-            running_loss += loss.item() * inputs.size(0)
-            running_corrects += torch.sum(preds == labels.data).item()
+            loss.backward()
+            optimizer.step()
 
-        epoch_loss = running_loss / dataset_sizes[phase]
-        epoch_acc = running_corrects / dataset_sizes[phase]
+            running_loss += loss.item()
 
-        print(f"{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
+        dt = time.time() - t0
+        avg_loss = running_loss / len(train_loader)
 
-        # Save best model
-        if phase == "val" and epoch_acc > best_acc:
-            best_acc = epoch_acc
-            best_model_wts = copy.deepcopy(model.state_dict())
+        print(f"[Epoch {epoch}]  Loss = {avg_loss:.4f}   ({dt:.1f} sec)")
 
-print(f"\nTraining complete. Best val Acc: {best_acc:.4f}")
+        # ----------------------------------------------------
+        # Validation accuracy
+        # ----------------------------------------------------
+        model.eval()
+        acc = AccuracyMetric()
 
-# -----------------------------
-# Save model
-# -----------------------------
-model.load_state_dict(best_model_wts)
-save_path = homework_path / "classifier.th"
-torch.save(model.state_dict(), save_path)
-print(f"Saved model weights to: {save_path.resolve()}")
+        with torch.inference_mode():
+            for batch in val_loader:
+                img = batch["image"].to(device)
+                labels = batch["label"].to(device)
+
+                pred = model.predict(img)
+                acc.add(pred, labels)
+
+        print(f"  Val Accuracy:  {acc.value():.4f}")
+
+    # --------------------------------------------------------
+    # Save final model
+    # --------------------------------------------------------
+    print_banner("Saving Model")
+    path = save_model(model)
+    print(f"Model saved to: {path}")
+    return path
+
+
+# ------------------------------------------------------------
+# Entry point
+# ------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--batch", type=int, default=32)
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--transform", type=str, default="default")
+
+    args = parser.parse_args()
+
+    train_classification(
+        batch_size=args.batch,
+        epochs=args.epochs,
+        lr=args.lr,
+        transform=args.transform,
+    )
+
+
+if __name__ == "__main__":
+    main()
