@@ -2,7 +2,7 @@
 Train script for Homework 3 — Detection (Segmentation + Depth)
 
 Run using:
-    python -m homework.train_detection
+    python -m homework.train_detection --dataset <path_to_dataset>
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import time
 # Correct relative imports
 from .datasets.classification_dataset import SuperTuxDataset, load_data
 from .models import Detector, load_model, save_model
-from .metrics import AccuracyMetric, ConfusionMatrix, DetectionMetric
+from .metrics import ConfusionMatrix, DetectionMetric
 
 
 # ------------------------------------------------------------
@@ -90,7 +90,8 @@ def train_detection(
     # --------------------------------------------------------
     # Metrics
     # --------------------------------------------------------
-    metrics = DetectionMetric(num_classes=3)
+    cm = ConfusionMatrix(num_classes=3)
+    depth_metric = DetectionMetric(num_classes=3)
 
     # --------------------------------------------------------
     # Training
@@ -103,9 +104,11 @@ def train_detection(
         running_loss = 0.0
 
         for batch in train_loader:
-            img = batch["image"].to(device)
-            depth_tgt = batch["depth"].to(device)
-            seg_tgt = batch["track"].to(device)
+            # Unpack batch tuple (image, segmentation, depth)
+            img, seg_tgt, depth_tgt = batch
+            img = img.to(device)
+            seg_tgt = seg_tgt.to(device)
+            depth_tgt = depth_tgt.to(device)
 
             optimizer.zero_grad()
             seg_logits, depth_pred = model(img)
@@ -125,21 +128,29 @@ def train_detection(
         # ----------------------------------------------------
         # Validation
         # ----------------------------------------------------
-        metrics.reset()
+        model.eval()
+        cm.reset()
+        depth_metric.reset()
 
         with torch.inference_mode():
             for batch in val_loader:
-                img = batch["image"].to(device)
-                depth_tgt = batch["depth"].to(device)
-                seg_tgt = batch["track"].to(device)
+                img, seg_tgt, depth_tgt = batch
+                img = img.to(device)
+                seg_tgt = seg_tgt.to(device)
+                depth_tgt = depth_tgt.to(device)
 
                 seg_pred, depth_pred = model.predict(img)
-                metrics.add(seg_pred, seg_tgt, depth_pred, depth_tgt)
+                cm.add(seg_pred, seg_tgt)
+                depth_metric.add(seg_pred, seg_tgt, depth_pred, depth_tgt)
 
-        results = metrics.compute()
-        print(f"  Val mIoU:       {results['iou']:.4f}")
-        print(f"  Val MAE:        {results['abs_depth_error']:.4f}")
-        print(f"  Val MAE lanes:  {results['tp_depth_error']:.4f}")
+        metrics = depth_metric.compute()
+        iou = metrics["iou"]
+        mae = metrics["abs_depth_error"]
+        mae_lane = metrics["tp_depth_error"]
+
+        print(f"  Val mIoU:       {iou:.4f}")
+        print(f"  Val MAE:        {mae:.4f}")
+        print(f"  Val MAE lanes:  {mae_lane:.4f}")
 
     # --------------------------------------------------------
     # Save final model
