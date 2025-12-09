@@ -127,7 +127,10 @@ def train_classification(
                 pred = model.predict(img)
                 acc.add(pred, labels)
 
-        print(f"  Val Accuracy:  {acc.compute():.4f}")
+        # Compute the metric and extract the float value
+        acc_result = acc.compute()           # returns a dict
+        accuracy = acc_result['accuracy']    # get the actual accuracy
+        print(f"  Val Accuracy:  {accuracy:.4f}")
 
 
     # --------------------------------------------------------
