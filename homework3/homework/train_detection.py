@@ -15,9 +15,9 @@ import argparse
 import time
 
 # Correct relative imports
-from .datasets.classification_dataset import SuperTuxDataset, load_data
+from .datasets.classification_dataset import SuperTuxDataset
 from .models import Detector, load_model, save_model
-from .metrics import ConfusionMatrix, DetectionMetric
+from .metrics import DetectionMetric
 
 
 # ------------------------------------------------------------
@@ -36,13 +36,15 @@ def print_banner(msg: str):
 
 def collate_fn(batch):
     """
-    Custom collate function for dict datasets
-    Converts list of dicts into dict of stacked tensors
+    Custom collate function for datasets returning tuples:
+        (image, depth, track)
+    Converts list of tuples into tuple of stacked tensors.
     """
-    out = {}
-    for key in batch[0].keys():
-        out[key] = torch.stack([torch.tensor(item[key]) if not isinstance(item[key], torch.Tensor) else item[key] for item in batch])
-    return out
+    imgs, depths, tracks = zip(*batch)
+    imgs = torch.stack([torch.tensor(x) if not isinstance(x, torch.Tensor) else x for x in imgs])
+    depths = torch.stack([torch.tensor(x) if not isinstance(x, torch.Tensor) else x for x in depths])
+    tracks = torch.stack([torch.tensor(x) if not isinstance(x, torch.Tensor) else x for x in tracks])
+    return imgs, depths, tracks
 
 
 # ------------------------------------------------------------
@@ -89,7 +91,7 @@ def train_detection(
         shuffle=True,
         num_workers=num_workers,
         pin_memory=True,
-        collate_fn=collate_fn,  # <-- added
+        collate_fn=collate_fn,
     )
 
     val_loader = DataLoader(
@@ -98,7 +100,7 @@ def train_detection(
         shuffle=False,
         num_workers=num_workers,
         pin_memory=True,
-        collate_fn=collate_fn,  # <-- added
+        collate_fn=collate_fn,
     )
 
     # --------------------------------------------------------
@@ -116,12 +118,10 @@ def train_detection(
         t0 = time.time()
         running_loss = 0.0
 
-        for batch in train_loader:
-
-            # <-- dict access
-            img       = batch["image"].to(device)
-            seg_tgt   = batch["track"].to(device)
-            depth_tgt = batch["depth"].to(device)
+        for img, depth_tgt, seg_tgt in train_loader:
+            img = img.to(device)
+            depth_tgt = depth_tgt.to(device)
+            seg_tgt = seg_tgt.to(device)
 
             optimizer.zero_grad()
             seg_logits, depth_pred = model(img)
@@ -143,11 +143,10 @@ def train_detection(
         metric.reset()
 
         with torch.inference_mode():
-            for batch in val_loader:
-
-                img       = batch["image"].to(device)
-                seg_tgt   = batch["track"].to(device)
-                depth_tgt = batch["depth"].to(device)
+            for img, depth_tgt, seg_tgt in val_loader:
+                img = img.to(device)
+                depth_tgt = depth_tgt.to(device)
+                seg_tgt = seg_tgt.to(device)
 
                 seg_pred, depth_pred = model.predict(img)
                 metric.add(seg_pred, seg_tgt, depth_pred, depth_tgt)
