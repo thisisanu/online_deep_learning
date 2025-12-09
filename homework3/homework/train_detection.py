@@ -2,7 +2,7 @@
 Train script for Homework 3 — Detection (Segmentation + Depth)
 
 Run using:
-    python -m homework.train_detection --dataset <path_to_dataset>
+    python -m homework.train_detection
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def print_banner(msg: str):
 # ------------------------------------------------------------
 
 def train_detection(
-    dataset_path: str,
+    dataset_path: str | Path = "classification_data",
     batch_size: int = 16,
     epochs: int = 5,
     lr: float = 1e-3,
@@ -69,10 +69,11 @@ def train_detection(
     # Data
     # --------------------------------------------------------
     dataset_path = Path(dataset_path)
-    train_data, val_data = load_data(dataset_path)
+    train_dataset = SuperTuxDataset(dataset_path / "train")
+    val_dataset = SuperTuxDataset(dataset_path / "val")
 
     train_loader = DataLoader(
-        train_data,
+        train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
@@ -80,7 +81,7 @@ def train_detection(
     )
 
     val_loader = DataLoader(
-        val_data,
+        val_dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
@@ -90,8 +91,7 @@ def train_detection(
     # --------------------------------------------------------
     # Metrics
     # --------------------------------------------------------
-    cm = ConfusionMatrix(num_classes=3)
-    depth_metric = DetectionMetric(num_classes=3)
+    metric = DetectionMetric(num_classes=3)
 
     # --------------------------------------------------------
     # Training
@@ -104,8 +104,7 @@ def train_detection(
         running_loss = 0.0
 
         for batch in train_loader:
-            # Unpack batch tuple (image, segmentation, depth)
-            img, seg_tgt, depth_tgt = batch
+            img, seg_tgt, depth_tgt = batch  # unpack dataset tuple
             img = img.to(device)
             seg_tgt = seg_tgt.to(device)
             depth_tgt = depth_tgt.to(device)
@@ -125,12 +124,9 @@ def train_detection(
         avg_loss = running_loss / len(train_loader)
         print(f"[Epoch {epoch}]  Loss = {avg_loss:.4f}   ({dt:.1f} sec)")
 
-        # ----------------------------------------------------
         # Validation
-        # ----------------------------------------------------
         model.eval()
-        cm.reset()
-        depth_metric.reset()
+        metric.reset()
 
         with torch.inference_mode():
             for batch in val_loader:
@@ -140,21 +136,15 @@ def train_detection(
                 depth_tgt = depth_tgt.to(device)
 
                 seg_pred, depth_pred = model.predict(img)
-                cm.add(seg_pred, seg_tgt)
-                depth_metric.add(seg_pred, seg_tgt, depth_pred, depth_tgt)
+                metric.add(seg_pred, seg_tgt, depth_pred, depth_tgt)
 
-        metrics = depth_metric.compute()
-        iou = metrics["iou"]
-        mae = metrics["abs_depth_error"]
-        mae_lane = metrics["tp_depth_error"]
+        results = metric.compute()
+        print(f"  Val mIoU:       {results['iou']:.4f}")
+        print(f"  Val Accuracy:   {results['accuracy']:.4f}")
+        print(f"  Val Depth MAE:  {results['abs_depth_error']:.4f}")
+        print(f"  Val Depth TP:   {results['tp_depth_error']:.4f}")
 
-        print(f"  Val mIoU:       {iou:.4f}")
-        print(f"  Val MAE:        {mae:.4f}")
-        print(f"  Val MAE lanes:  {mae_lane:.4f}")
-
-    # --------------------------------------------------------
     # Save final model
-    # --------------------------------------------------------
     print_banner("Saving Model")
     path = save_model(model)
     print(f"Model saved to: {path}")
@@ -167,7 +157,12 @@ def train_detection(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, required=True, help="Path to dataset")
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="classification_data",  # change to your detection dataset folder
+        help="Path to dataset",
+    )
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
