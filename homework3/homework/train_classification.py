@@ -64,7 +64,7 @@ def train_classification(
     # Data loading
     # --------------------------------------------------------
     # Root path that contains both train/val folders
-    dataset_path = Path("drive_data")  
+    dataset_path = Path("classification_data")  
 
     # load_data returns both train and val datasets
     train_data, val_data = load_data(dataset_path, transform_pipeline=transform)
