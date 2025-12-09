@@ -1,1 +1,1 @@
-from .models import load_model as load_model
+from .classification_dataset import SuperTuxClassificationDataset, get_class_names, load_data
