@@ -14,11 +14,9 @@ from pathlib import Path
 import argparse
 import time
 
-# Correct import: use SuperTuxDataset
 from .datasets.classification_dataset import SuperTuxDataset, load_data
-from .models import Classifier
+from .models import Classifier, load_model, save_model
 from .metrics import AccuracyMetric
-from .models import load_model, save_model  # make sure load_model/save_model are imported
 
 # ------------------------------------------------------------
 # Utilities
@@ -39,6 +37,7 @@ def print_banner(msg: str):
 # ------------------------------------------------------------
 
 def train_classification(
+    dataset_path: str | Path = "classification_data",
     batch_size: int = 32,
     epochs: int = 5,
     lr: float = 1e-3,
@@ -47,6 +46,8 @@ def train_classification(
 ):
     device = get_device()
     print_banner(f"Training Classifier on device: {device}")
+
+    dataset_path = Path(dataset_path)
 
     # --------------------------------------------------------
     # Load model
@@ -63,13 +64,7 @@ def train_classification(
     # --------------------------------------------------------
     # Data loading
     # --------------------------------------------------------
-    # Root path that contains both train/val folders
-    dataset_path = Path("classification_data")  
-
-    # load_data returns both train and val datasets
-    # Create datasets for train and val
-    train_data = SuperTuxDataset(dataset_path / "train", transform_pipeline=transform)
-    val_data   = SuperTuxDataset(dataset_path / "val", transform_pipeline=transform)
+    train_data, val_data = load_data(dataset_path, transform_pipeline=transform)
 
     train_loader = DataLoader(
         train_data,
@@ -95,18 +90,17 @@ def train_classification(
     for epoch in range(1, epochs + 1):
         model.train()
         t0 = time.time()
-
         running_loss = 0.0
 
         for batch in train_loader:
-            img = batch["image"].to(device)         # (B,3,64,64)
-            labels = batch["label"].to(device)      # (B,)
+            # Unpack tuple from dataset
+            img, labels = batch
+            img = img.to(device)
+            labels = labels.to(device)
 
             optimizer.zero_grad()
-
             logits = model(img)
             loss = ce_loss(logits, labels)
-
             loss.backward()
             optimizer.step()
 
@@ -114,7 +108,6 @@ def train_classification(
 
         dt = time.time() - t0
         avg_loss = running_loss / len(train_loader)
-
         print(f"[Epoch {epoch}]  Loss = {avg_loss:.4f}   ({dt:.1f} sec)")
 
         # ----------------------------------------------------
@@ -125,8 +118,9 @@ def train_classification(
 
         with torch.inference_mode():
             for batch in val_loader:
-                img = batch["image"].to(device)
-                labels = batch["label"].to(device)
+                img, labels = batch
+                img = img.to(device)
+                labels = labels.to(device)
 
                 pred = model.predict(img)
                 acc.add(pred, labels)
@@ -149,14 +143,16 @@ def train_classification(
 def main():
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--dataset", type=str, default="classification_data")
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--transform", type=str, default="default")
-   
+
     args = parser.parse_args()
 
     train_classification(
+        dataset_path=args.dataset,
         batch_size=args.batch,
         epochs=args.epochs,
         lr=args.lr,
