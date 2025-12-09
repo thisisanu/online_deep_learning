@@ -64,7 +64,11 @@ def train_classification(
     # --------------------------------------------------------
     # Data loading
     # --------------------------------------------------------
-    train_data, val_data = load_data(dataset_path, transform_pipeline=transform)
+    train_data, val_data = load_data(
+        dataset_path / "train",  # train folder
+        dataset_path / "val",    # val folder
+        transform_pipeline=transform
+    )
 
     train_loader = DataLoader(
         train_data,
