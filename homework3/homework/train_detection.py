@@ -10,18 +10,14 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-
 from pathlib import Path
 import argparse
 import time
 
-from .models import load_model, save_model
-from .datasets.drive_dataset import load_data
-from .metrics import (
-    AccuracyMetric,
-    ConfusionMatrix,
-    DepthErrorMetric,
-)
+# Correct relative imports
+from .datasets.drive_dataset import SuperTuxDataset, load_data
+from .models import Detector, load_model, save_model
+from .metrics import AccuracyMetric, ConfusionMatrix, DepthErrorMetric
 
 
 # ------------------------------------------------------------
@@ -43,6 +39,7 @@ def print_banner(msg: str):
 # ------------------------------------------------------------
 
 def train_detection(
+    dataset_path: str,
     batch_size: int = 16,
     epochs: int = 5,
     lr: float = 1e-3,
@@ -71,7 +68,8 @@ def train_detection(
     # --------------------------------------------------------
     # Data
     # --------------------------------------------------------
-    train_data, val_data = load_data()
+    dataset_path = Path(dataset_path)
+    train_data, val_data = load_data(dataset_path)
 
     train_loader = DataLoader(
         train_data,
@@ -103,37 +101,29 @@ def train_detection(
     for epoch in range(1, epochs + 1):
         model.train()
         t0 = time.time()
-
         running_loss = 0.0
 
         for batch in train_loader:
-            img = batch["image"].to(device)             # shape (B,3,H,W)
-            depth_tgt = batch["depth"].to(device)       # shape (B,H,W)
-            seg_tgt = batch["track"].to(device)         # shape (B,H,W)
+            img = batch["image"].to(device)
+            depth_tgt = batch["depth"].to(device)
+            seg_tgt = batch["track"].to(device)
 
             optimizer.zero_grad()
-
             seg_logits, depth_pred = model(img)
 
-            # Loss components
             loss_seg = ce_loss(seg_logits, seg_tgt)
             loss_depth = l1_loss(depth_pred, depth_tgt)
-
             loss = loss_seg + loss_depth
 
             loss.backward()
             optimizer.step()
-
             running_loss += loss.item()
 
         dt = time.time() - t0
         avg_loss = running_loss / len(train_loader)
-
         print(f"[Epoch {epoch}]  Loss = {avg_loss:.4f}   ({dt:.1f} sec)")
 
-        # ----------------------------------------------------
         # Validation
-        # ----------------------------------------------------
         model.eval()
         cm.reset()
         depth_metric.reset()
@@ -145,7 +135,6 @@ def train_detection(
                 seg_tgt = batch["track"].to(device)
 
                 seg_pred, depth_pred = model.predict(img)
-
                 cm.add(seg_pred, seg_tgt)
                 depth_metric.add(depth_pred, depth_tgt, seg_tgt)
 
@@ -157,9 +146,7 @@ def train_detection(
         print(f"  Val MAE:        {mae:.4f}")
         print(f"  Val MAE lanes:  {mae_lane:.4f}")
 
-    # --------------------------------------------------------
     # Save final model
-    # --------------------------------------------------------
     print_banner("Saving Model")
     path = save_model(model)
     print(f"Model saved to: {path}")
@@ -172,14 +159,14 @@ def train_detection(
 
 def main():
     parser = argparse.ArgumentParser()
-
+    parser.add_argument("--dataset", type=str, required=True, help="Path to dataset")
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
-
     args = parser.parse_args()
 
     train_detection(
+        dataset_path=args.dataset,
         batch_size=args.batch,
         epochs=args.epochs,
         lr=args.lr,
