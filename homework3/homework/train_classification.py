@@ -63,7 +63,9 @@ def train_classification(
     # --------------------------------------------------------
     # Data loading
     # --------------------------------------------------------
-    train_data, val_data = load_data(transform_pipeline=transform)
+    dataset_path = Path("datasets/classification_dataset")  # set correct path
+    train_data, val_data = load_data(dataset_path, transform_pipeline=transform)
+
 
     train_loader = DataLoader(
         train_data,
@@ -147,6 +149,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--transform", type=str, default="default")
+    parser.add_argument("--dataset", type=str, required=True, help="Path to classification dataset")
+
 
     args = parser.parse_args()
 
